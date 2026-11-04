@@ -46,7 +46,7 @@ Status: failed test. Initial movement does not validate the complete run.
 
 The original calibration source used for this characterization run is preserved in:
 
-`src/calibrate/`
+`src/calibration/`
 
 Source version: v0.4.1.
 

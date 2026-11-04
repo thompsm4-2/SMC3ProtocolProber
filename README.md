@@ -28,7 +28,7 @@
 ```text
 Linux_DOF_Reality_H3_Engineering_Handoff_v1.0/
 ├── src/
-│   └── calibrate/
+│   └── calibration/
 │       └── h3_characterize.py
 │       └── README.md
 │       └── test_fake_serial.py

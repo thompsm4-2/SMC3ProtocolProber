@@ -61,3 +61,5 @@ After making changes:
 
 Never claim a hardware test was successful unless
 the hardware test was actually performed.
+
+Before beginning a task, identify and read the relevant project documentation and QWEN_INSTRUCTIONS.md. Treat QWEN_INSTRUCTIONS.md as supplemental engineering requirements, not as a replacement for AGENTS.md.

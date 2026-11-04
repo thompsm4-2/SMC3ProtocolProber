@@ -18,7 +18,7 @@ Do not casually refactor or replace this baseline.
 
 Location:
 
-`src/calibrate/`
+`src/calibration/`
 
 This directory preserves the original v0.4.1 calibration source used to produce the historical Motor C characterization logs.
 

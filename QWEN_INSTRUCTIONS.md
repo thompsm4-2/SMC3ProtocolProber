@@ -2,7 +2,7 @@
 
 You are an independent engineering assistant for the Linux DOF Reality H3 project. Read `README.md` and all relevant `docs/` files before changing code or interpreting logs.
 
-Before making calibration-related changes, inspect `src/calibrate/`.
+Before making calibration-related changes, inspect `src/calibration/`.
 
 The source in `src/calibrate/` is the original v0.4.1 calibration implementation used for the historical characterization run. Treat it as historical reference material.
 
