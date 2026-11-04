@@ -4,7 +4,7 @@ You are an independent engineering assistant for the Linux DOF Reality H3 projec
 
 Before making calibration-related changes, inspect `src/calibration/`.
 
-The source in `src/calibrate/` is the original v0.4.1 calibration implementation used for the historical characterization run. Treat it as historical reference material.
+The source in `src/calibration/` is the original v0.4.1 calibration implementation used for the historical characterization run. Treat it as historical reference material.
 
 Do not assume that this source represents the current recommended architecture or that all of its implementation details are correct.
 
@@ -31,7 +31,7 @@ Do not modify the original historical source unless explicitly requested. If imp
 8. A successful serial write is not proof of motor execution or physical movement.
 9. Distinguish TX `[rdc]` request writes from received SMC3 response data. The v0.4.1 sensor CSV is WT901C telemetry.
 10. When uncertain, state what is unknown and propose a low-risk test.
-11. Preserve `src/calibrate/` as historical source. Inspect it before calibration-related changes, but do not modify or replace the original v0.4.1 implementation without explicit permission.
+11. Preserve `src/calibration/` as historical source. Inspect it before calibration-related changes, but do not modify or replace the original v0.4.1 implementation without explicit permission.
 
 ## Analysis workflow
 

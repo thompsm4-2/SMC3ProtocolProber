@@ -15,7 +15,7 @@
 
 ## Package contents
 
-- `src/calibrate/` — original v0.4.1 calibration source code, preserved as a historical reference.
+- `src/calibration/` — original v0.4.1 calibration source code, preserved as a historical reference.
 - `docs/` — project and hardware reference.
 - `analysis/analyze_h3_characterization.py` — standard-library-only repeatable CSV analysis utility.
 - `data/raw/` — original user-provided v0.4.1 logs, copied unchanged from the uploaded ZIP.
