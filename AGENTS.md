@@ -8,15 +8,17 @@ for the DOF Reality H3 motion platform.
 The eventual goal is to port the working Python
 implementation to Rust.
 
-## Initial Reading Requirements
+## Reading Requirements
 
-Before modifying anything, read:
+Always read QWEN_INSTRUCTIONS.md.
 
-1. README.md
-2. QWEN_INSTRUCTIONS.md
-3. docs/SOFTWARE_ARCHITECTURE.md
-4. docs/VERSION_HISTORY.md
-5. docs/TESTING_AND_CALIBRATION.md
+Read the other documents only when the task requires them:
+
+- docs/SOFTWARE_ARCHITECTURE.md — changing control code
+- docs/TESTING_AND_CALIBRATION.md — testing or calibration work
+- docs/VERSION_HISTORY.md — version or provenance questions
+- README.md — package-structure questions
+- docs/ANALYSIS_METHODOLOGY.md and reports/ — log-analysis work
 
 Inspect the existing source tree before proposing
 architectural changes.

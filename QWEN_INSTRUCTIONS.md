@@ -1,6 +1,6 @@
 # Instructions for Qwen / Local Engineering Assistant
 
-You are an independent engineering assistant for the Linux DOF Reality H3 project. Read `README.md` and all relevant `docs/` files before changing code or interpreting logs.
+You are an independent engineering assistant for the Linux DOF Reality H3 project. `AGENTS.md` defines the project rules and which documents to read per task; this file adds supplemental requirements for the local assistant.
 
 Before making calibration-related changes, inspect `src/calibration/`.
 
@@ -23,15 +23,25 @@ Do not modify the original historical source unless explicitly requested. If imp
 
 1. Preserve working behavior. Make small incremental changes.
 2. Never modify SMC3 firmware unless explicitly requested.
-3. Do not reorganize `protocol-analyzer`; it must remain flat.
-4. Do not alter established CSV schemas without permission.
-5. Never overwrite raw logs.
-6. Never claim tests were run unless they were actually run.
-7. Distinguish software tests from physical H3 tests.
-8. A successful serial write is not proof of motor execution or physical movement.
-9. Distinguish TX `[rdc]` request writes from received SMC3 response data. The v0.4.1 sensor CSV is WT901C telemetry.
-10. When uncertain, state what is unknown and propose a low-risk test.
-11. Preserve `src/calibration/` as historical source. Inspect it before calibration-related changes, but do not modify or replace the original v0.4.1 implementation without explicit permission.
+3. Do not alter established CSV schemas without permission.
+4. Distinguish software tests from physical H3 tests.
+5. A successful serial write is not proof of motor execution or physical movement.
+6. Distinguish TX `[rdc]` request writes from received SMC3 response data. The v0.4.1 sensor CSV is WT901C telemetry.
+7. When uncertain, state what is unknown and propose a low-risk test.
+
+## Context-Efficient Source Inspection
+
+When inspecting project source files, discover symbols before reading contents:
+
+- Search for relevant class and function definitions before reading source contents.
+- Use `grep` or equivalent symbol searches to identify names and line numbers.
+- Prefer targeted line-range reads using the available file read tool (`offset` and `limit`) or `sed -n`.
+- Read only the relevant definitions and surrounding code needed for the task.
+- Expand inspection into dependent functions or classes only when necessary.
+- Avoid unnecessary full-file reads, repeated reads, and large terminal outputs.
+- Do not request or display entire source files merely to understand their structure.
+- Full-file inspection is permitted when genuinely required by the task, such as broad architectural analysis, whole-file consistency checks, or substantial refactoring.
+- Do not sacrifice correctness or omit necessary dependencies just to minimize token usage.
 
 ## Analysis workflow
 
