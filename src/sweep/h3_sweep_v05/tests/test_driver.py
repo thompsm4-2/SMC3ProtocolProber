@@ -258,9 +258,17 @@ class SubmissionTrackingHub:
         return self._submission_order
 
 
-def make_submission_tracking_hub(harness):
-    """Create a hub that tracks motor command submissions."""
-    original_hub = harness.make_hub()
+def make_submission_tracking_hub(harness_or_hub):
+    """Create a hub that tracks motor command submissions.
+    
+    Accepts either a HubHarness (which has a make_hub method) or
+    a CommandHub (which is already a hub).
+    """
+    # Check if it's a harness (has make_hub method) or already a hub
+    if hasattr(harness_or_hub, 'make_hub'):
+        original_hub = harness_or_hub.make_hub()
+    else:
+        original_hub = harness_or_hub
     return SubmissionTrackingHub(original_hub)
 
 

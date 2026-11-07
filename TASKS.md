@@ -35,7 +35,7 @@ Broken down from `Implementation.md`. Status corrected 2026-11-05: v0.3.5.1 Comm
 - [x] **T3.2** Driver-owned expected-frame ledger: generate expected frames via archived `MotorCommand`/`encode_command`; preserve exact motor order and encoded bytes.
 - [x] **T3.3** Per-point sequencing: generate 3 expected frames (A, B, C) → snapshot attempt_seq and tx_count → submit 3 `MotorCommand` objects via CommandHub motion path → wait for 3 new closed attempt records → compare recorded vs. expected ledger → verify byte counts → verify statuses → record point result → only then submit next point.
 - [x] **T3.4** Enforce: point k's three-attempt barrier completes before point k+1 is submitted (protects against latest-value-per-motor coalescing).
-- [ ] **T3.5** Associate attempts to points via monotonically increasing sequence numbers + point expectation ledger (not approximate timestamps).
+- [x] **T3.5** Associate attempts to points via monotonically increasing sequence numbers + point expectation ledger (not approximate timestamps).
 - [ ] **T3.6** Control frames classified separately; never count toward a point's three motor-position frames. Frame mismatch = software error → point FAILED.
 - [ ] **T3.7** Point classification: 3 matching all-OK frames + tx_count Δ3 → `COMPLETE`; any short write → `DEGRADED`; any write exception → `FAILED`; barrier timeout → `FAILED`; frame mismatch → `FAILED`; unexpected motor/missing frame → `FAILED`. A short write fails the point even with Δ3.
 - [ ] **T3.8** Use `MotorCommand` via motion queue for all ordinary motor-position commands; never `submit_control()` for those. Control queue reserved for real SMC3 control frames.
