@@ -39,7 +39,7 @@ Broken down from `Implementation.md`. Status corrected 2026-11-05: v0.3.5.1 Comm
 - [x] **T3.6** Control frames classified separately; never count toward a point's three motor-position frames. Frame mismatch = software error → point FAILED.
 - [x] **T3.7** Point classification: 3 matching all-OK frames + tx_count Δ3 → `COMPLETE`; any short write → `DEGRADED`; any write exception → `FAILED`; barrier timeout → `FAILED`; frame mismatch → `FAILED`; unexpected motor/missing frame → `FAILED`. A short write fails the point even with Δ3.
 - [x] **T3.8** Use `MotorCommand` via motion queue for all ordinary motor-position commands; never `submit_control()` for those. Control queue reserved for real SMC3 control frames.
-- [ ] **T3.9** Classification implemented in new package from documented protocol; do not import/execute historical v0.4.1 source.
+- [x] **T3.9** Classification implemented in new package from documented protocol; do not import/execute historical v0.4.1 source.
 
 ## Phase 4 — Shutdown and Worker-Lingering Handling
 
