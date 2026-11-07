@@ -639,6 +639,7 @@ class DriverTests(unittest.TestCase):
         required = {
             "point_id", "tx_count_before", "attempts_expected",
             "attempts_submitted", "barrier_satisfied", "verification",
+            "classification", "classification_reason",
             "timed_out", "point_interrupted",
         }
         for observation in driver_run_observations():

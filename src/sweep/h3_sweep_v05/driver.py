@@ -44,6 +44,7 @@ were installed onto, and the barrier watches that recorder.
 """
 from __future__ import annotations
 
+from .classifier import classify_point
 from .ledger import Ledger, LedgerError, MotorCommand
 from .recorder import Barrier, AttemptBatch
 
@@ -151,6 +152,7 @@ def run(
         # recorded in the journal but must not count toward verification),
         # then verify against the point's expected frames.
         verification = None
+        classification = None
         if barrier_satisfied:
             # Filter the batch to only motor-position frames using the
             # recorder's classification (is_motor_frame field).
@@ -160,7 +162,18 @@ def run(
                 if attempt["is_motor_frame"]
             ]
             verification = ledger_obj.verify(point_id, motor_batch)
+            # Classify the point based on verification and attempt data
+            classification = classify_point(
+                verification_result=verification,
+                tx_count_before=tx_before,
+                barrier_timed_out=False,
+                attempts=batch,
+            )
+            # Call classify() to set the status before accessing properties
+            if classification:
+                classification.classify()
 
+        # T3.7: add classification info to results
         results.append(
             {
                 "point_id": point_id,
@@ -169,6 +182,8 @@ def run(
                 "attempts_submitted": submitted,
                 "barrier_satisfied": barrier_satisfied,
                 "verification": verification,
+                "classification": classification.status if classification else None,
+                "classification_reason": classification.reason if classification else None,
                 "timed_out": not barrier_satisfied and not interrupted,
                 "point_interrupted": interrupted,
             }
