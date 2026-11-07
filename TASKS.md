@@ -25,15 +25,15 @@ Broken down from `Implementation.md`. Status corrected 2026-11-05: v0.3.5.1 Comm
 - [x] **T2.3** Prohibitions: no modification of private `SerialTransport._serial`, no second serial connection, no bypassing the archived transport's write lock/lifecycle.
 - [x] **T2.4** Scope recorder to one run; restore original `smc3.serial` reference during cleanup only after the worker can no longer use the recorded serial. Document the module-level injection limitation (not thread-safe for concurrent runs).
 - [x] **T2.5** Attempt record fields: `attempt_seq`, `timestamp`, `monotonic_timestamp`, `frame_bytes`, `returned_count`, `expected_count`, `status`, `exception`. Monotonic sequence numbers; monotonic time for ordering. Recorder must be thread-safe.
-- [ ] **T2.6** Status classification: `OK` (exact expected bytes), `SHORT` (fewer), `ERROR` (exception). Expected SMC3 frame length = 5 bytes.
-- [ ] **T2.7** On exception: record `ERROR`, preserve exception info, re-raise original exception so archived CommandHub sees the same failure. Never convert exceptions to successful returns.
-- [ ] **T2.8** Record `SHORT` even though CommandHub may still increment `tx_count`. Never silently discard partial writes.
+- [x] **T2.6** Status classification: `OK` (exact expected bytes), `SHORT` (fewer), `ERROR` (exception). Expected SMC3 frame length = 5 bytes.
+- [x] **T2.7** On exception: record `ERROR`, preserve exception info, re-raise original exception so archived CommandHub sees the same failure. Never convert exceptions to successful returns.
+- [x] **T2.8** Record `SHORT` even though CommandHub may still increment `tx_count`. Never silently discard partial writes.
 
 ## Phase 3 — Ledger and Write-Attempt Barrier
 
-- [ ] **T3.1** Barrier interface: `Barrier.wait_for_attempts(expected: int, timeout: float) -> AttemptBatch`. Waits until N attempts reach terminal state (`OK`/`SHORT`/`ERROR`). Bounded timeout, no indefinite hang. Must not use `wait_for_idle()` or rely on `tx_count` alone.
-- [ ] **T3.2** Driver-owned expected-frame ledger: generate expected frames via archived `MotorCommand`/`encode_command`; preserve exact motor order and encoded bytes.
-- [ ] **T3.3** Per-point sequencing: generate 3 expected frames (A, B, C) → snapshot attempt_seq and tx_count → submit 3 `MotorCommand` objects via CommandHub motion path → wait for 3 new closed attempt records → compare recorded vs. expected ledger → verify byte counts → verify statuses → record point result → only then submit next point.
+- [x] **T3.1** Barrier interface: `Barrier.wait_for_attempts(expected: int, timeout: float) -> AttemptBatch`. Waits until N attempts reach terminal state (`OK`/`SHORT`/`ERROR`). Bounded timeout, no indefinite hang. Must not use `wait_for_idle()` or rely on `tx_count` alone.
+- [x] **T3.2** Driver-owned expected-frame ledger: generate expected frames via archived `MotorCommand`/`encode_command`; preserve exact motor order and encoded bytes.
+- [x] **T3.3** Per-point sequencing: generate 3 expected frames (A, B, C) → snapshot attempt_seq and tx_count → submit 3 `MotorCommand` objects via CommandHub motion path → wait for 3 new closed attempt records → compare recorded vs. expected ledger → verify byte counts → verify statuses → record point result → only then submit next point.
 - [ ] **T3.4** Enforce: point k's three-attempt barrier completes before point k+1 is submitted (protects against latest-value-per-motor coalescing).
 - [ ] **T3.5** Associate attempts to points via monotonically increasing sequence numbers + point expectation ledger (not approximate timestamps).
 - [ ] **T3.6** Control frames classified separately; never count toward a point's three motor-position frames. Frame mismatch = software error → point FAILED.
