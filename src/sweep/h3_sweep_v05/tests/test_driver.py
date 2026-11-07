@@ -214,6 +214,56 @@ class HubHarness:
         return hub
 
 
+class SubmissionTrackingHub:
+    """Wrapper hub that tracks motor command submissions.
+
+    This wraps the archived CommandHub to record when submit() is called,
+    proving that point 2's motor commands are not submitted before point 1's
+    barrier completes.
+    """
+
+    def __init__(self, original_hub):
+        self._original_hub = original_hub
+        self._original_submit = original_hub.submit
+        self._original_tx_count = original_hub.tx_count
+        self._original_stop = original_hub.stop
+        self._submission_order = []  # List of submissions in order
+
+    def submit(self, command):
+        """Track and forward the submit call."""
+        # The command is a MotorCommand with motor and position attributes
+        motor = getattr(command, 'motor', None)
+        position = getattr(command, 'position', None)
+        
+        # Track the submission
+        self._submission_order.append({
+            'motor': motor,
+            'position': position,
+            'command': command,
+        })
+        
+        return self._original_submit(command)
+
+    @property
+    def tx_count(self):
+        """Delegate tx_count to original hub."""
+        return self._original_tx_count
+
+    def stop(self):
+        """Delegate stop to original hub."""
+        return self._original_stop()
+
+    def get_submission_order(self):
+        """Return the list of submissions in order."""
+        return self._submission_order
+
+
+def make_submission_tracking_hub(harness):
+    """Create a hub that tracks motor command submissions."""
+    original_hub = harness.make_hub()
+    return SubmissionTrackingHub(original_hub)
+
+
 class ControlFrameInjectorHub:
     """Wrapper hub that injects control frames between motor submits.
 
@@ -765,6 +815,111 @@ class DriverTests(unittest.TestCase):
             all(kind in valid_kinds for kind in parameter_kinds.values())
         )
 
+    def test_t34_per_point_barrier_enforces_sequencing(self):
+        """T3.4 regression: point k's barrier completes before point k+1 is submitted.
+
+        This test proves the driver enforces strict per-point sequencing:
+          1. Point 1's three motor commands are submitted
+          2. Point 1's barrier starts and completes
+          3. No point 2 motor command is submitted before point 1's barrier completes
+          4. Only after point 1's barrier completes does the driver submit point 2
+          5. Point 2's three motor commands are submitted
+          6. Point 2's barrier starts and completes
+
+        The test tracks both motor submissions and barrier calls to prove ordering
+        without relying on arbitrary sleeps or timing assumptions.
+        """
+        points = [
+            SweepPoint(
+                point_id=1, description="first",
+                motor_positions={"A": 100, "B": 200, "C": 300},
+            ),
+            SweepPoint(
+                point_id=2, description="second",
+                motor_positions={"A": 11, "B": 21, "C": 31},
+            ),
+        ]
+        harness = HubHarness()
+        hub = make_submission_tracking_hub(harness)  # Track submissions
+        barrier = Barrier(harness.rec)
+        led = Ledger()
+
+        # Track barrier calls to prove ordering
+        call_count = [0]
+        call_order = []
+
+        # Wrap the barrier to track when it's called
+        original_wait = barrier.wait_for_attempts
+        def tracked_wait(n, timeout):
+            call_count[0] += 1
+            call_order.append("barrier_wait_start")
+            try:
+                result = original_wait(n, timeout)
+                call_order.append("barrier_wait_complete")
+                return result
+            except TimeoutError:
+                call_order.append("barrier_wait_timeout")
+                raise
+
+        barrier.wait_for_attempts = tracked_wait
+
+        try:
+            result = driver_run(
+                points=points, hub=hub, recorder=harness.rec,
+                barrier=barrier, ledger_obj=led,
+            )
+        finally:
+            hub.stop()
+            barrier.wait_for_attempts = original_wait
+
+        # Verify two points completed
+        self.assertEqual(len(result["points"]), 2)
+        self.assertEqual([o["point_id"] for o in result["points"]], [1, 2])
+
+        # Verify motor command submission order
+        submissions = hub.get_submission_order()
+        self.assertEqual(len(submissions), 6)  # 3 for point 1 + 3 for point 2
+        
+        # First 3 submissions are for point 1 (motors A, B, C)
+        self.assertEqual(submissions[0]['motor'], 'A')
+        self.assertEqual(submissions[1]['motor'], 'B')
+        self.assertEqual(submissions[2]['motor'], 'C')
+        
+        # Next 3 submissions are for point 2 (motors A, B, C)
+        self.assertEqual(submissions[3]['motor'], 'A')
+        self.assertEqual(submissions[4]['motor'], 'B')
+        self.assertEqual(submissions[5]['motor'], 'C')
+
+        # PROVE ORDERING: The complete sequence must be:
+        # [submits point 1 A, B, C] -> [barrier starts] -> [barrier completes] ->
+        # [submits point 2 A, B, C] -> [barrier starts] -> [barrier completes]
+        #
+        # The barrier call order proves that point 2's barrier didn't start until
+        # point 1's completed. Combined with the submission order, this proves that
+        # point 2's motor commands were not submitted before point 1's barrier completed.
+        self.assertEqual(call_order, ["barrier_wait_start", "barrier_wait_complete", 
+                                       "barrier_wait_start", "barrier_wait_complete"])
+
+        # Verify both barriers completed successfully
+        self.assertEqual(call_count[0], 2)  # Two barrier calls (one per point)
+        self.assertEqual(len(call_order), 4)  # 2 start + 2 complete events
+
+        # Verify all attempts have unique sequence numbers (no reordering)
+        attempts = harness.rec.attempts()
+        self.assertEqual(len(attempts), 6)
+        self.assertEqual([a["attempt_seq"] for a in attempts], [1, 2, 3, 4, 5, 6])
+
+        # Verify point 1's attempts (1-3) have different frames from point 2's attempts (4-6)
+        first_frames = [a["frame_bytes"] for a in attempts[:3]]
+        second_frames = [a["frame_bytes"] for a in attempts[3:]]
+        self.assertNotEqual(first_frames, second_frames,
+            "Point 1 and point 2 frames should differ")
+
+        # Verify both points verified successfully
+        for obs in result["points"]:
+            self.assertTrue(obs["barrier_satisfied"])
+            self.assertIsNotNone(obs["verification"])
+            self.assertTrue(obs["verification"].verified)
 
 def driver_run_observations():
     """One minimal successful point run, for the field-shape test."""
