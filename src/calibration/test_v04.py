@@ -182,44 +182,6 @@ def test_tx_logger():
     print("TXLogger(): PASSED\n")
 
 
-def test_readback_poller():
-    """Test readback poller."""
-    print("Testing ReadbackPoller...")
-    
-    # The poller polls all motors at once
-    # We need responses for the poller writes (6 responses for 3 motors x 2 writes each)
-    h3 = FakeSerial(responses=[
-        (b"[rda]", b"[rda]OK5D"),  # Poll 1: A
-        (b"[rdb]", b"[rdb]OK5D"),  # Poll 1: B
-        (b"[rdc]", b"[rdc]OK5D"),  # Poll 1: C
-        (b"[rda]", b"[rda]OK5D"),  # Poll 2: A
-        (b"[rdb]", b"[rdb]OK5D"),  # Poll 2: B
-        (b"[rdc]", b"[rdc]OK5D"),  # Poll 2: C
-    ])
-    
-    # Start poller
-    poller = ReadbackPoller(h3, "ABC", timeout=0.1, interval=0.1)
-    poller.start()
-    
-    # Give it a moment to poll
-    time.sleep(0.3)
-    
-    # Stop poller
-    poller.stop()
-    
-    if os.path.exists("smc3_readback.log"):
-        with open("smc3_readback.log", 'r') as f:
-            lines = f.readlines()
-        
-        # Should have header + 6 data lines (2 polls x 3 motors)
-        assert len(lines) >= 2, f"Expected at least 2 lines, got {len(lines)}"
-        print(f"  Polling: OK ({len(lines) - 1} data lines)")
-    
-    if os.path.exists("smc3_readback.log"):
-        os.unlink("smc3_readback.log")
-    print("ReadbackPoller(): PASSED\n")
-
-
 def test_full_integration():
     """Test full integration with fake serial."""
     print("Testing full integration...")
@@ -253,6 +215,256 @@ def test_full_integration():
         h3.close()
     
     print("Full integration: PASSED\n")
+
+
+def test_context_manager_entry_exit():
+    """Test ReadbackPoller context manager entry and exit."""
+    print("Testing context manager entry/exit...")
+    
+    import csv
+    
+    # Create a FakeSerial with minimal responses
+    h3 = FakeSerial(responses=[b"[rda]OK5D"])
+    
+    # Use ReadbackPoller as a context manager
+    with ReadbackPoller(h3, "/tmp/test_context_manager.csv", timeout=0.1, interval=0.25) as poller:
+        # Call poll_motor() directly for a single motor
+        poller.poll_motor("A", 512)
+    
+    # Verify CSV log file was created with correct header
+    assert os.path.exists("/tmp/test_context_manager.csv"), "CSV log file not created"
+    
+    with open("/tmp/test_context_manager.csv", 'r') as f:
+        lines = f.readlines()
+    
+    # Check header row
+    assert "timestamp" in lines[0], "Missing 'timestamp' in header"
+    assert "elapsed_ms" in lines[0], "Missing 'elapsed_ms' in header"
+    assert "motor" in lines[0], "Missing 'motor' in header"
+    assert "requested_position" in lines[0], "Missing 'requested_position' in header"
+    assert "request_hex" in lines[0], "Missing 'request_hex' in header"
+    assert "response_hex" in lines[0], "Missing 'response_hex' in header"
+    assert "response_len" in lines[0], "Missing 'response_len' in header"
+    assert "response_time_ms" in lines[0], "Missing 'response_time_ms' in header"
+    assert "status" in lines[0], "Missing 'status' in header"
+    assert "error" in lines[0], "Missing 'error' in header"
+    
+    # Verify file is properly closed (can be reopened and read)
+    with open("/tmp/test_context_manager.csv", 'r') as f:
+        content = f.read()
+    assert len(content) > 0, "CSV file is empty"
+    
+    # Cleanup
+    os.unlink("/tmp/test_context_manager.csv")
+    
+    print("  Context manager entry/exit: OK")
+    print("  CSV header verification: OK")
+    print("  File closure verification: OK")
+    print("Context manager entry/exit: PASSED\n")
+
+
+def test_successful_poll_motor():
+    """Test successful poll_motor() operation with valid response."""
+    print("Testing successful poll_motor()...")
+    
+    import csv
+    
+    # Create FakeSerial with valid response for motor A
+    h3 = FakeSerial(responses=[b"[rda]OK5D"])
+    
+    with ReadbackPoller(h3, "/tmp/test_successful_poll.csv", timeout=0.1, interval=0.25) as poller:
+        poller.poll_motor("A", 512)
+    
+    # Verify response was captured correctly
+    with open("/tmp/test_successful_poll.csv", 'r') as f:
+        lines = f.readlines()
+    
+    # Should have header + 1 data line
+    assert len(lines) == 2, f"Expected 2 lines, got {len(lines)}"
+    
+    # Check status is OK
+    assert "OK" in lines[1], f"Status should be OK, got: {lines[1]}"
+    
+    # Check response_len matches expected (7 bytes: [rda]OK5D)
+    # Column indices: 0=timestamp, 1=elapsed_ms, 2=motor, 3=requested_position, 
+    #                 4=request_hex, 5=response_hex, 6=response_len, 7=response_time_ms, 8=status, 9=error
+    response_len = lines[1].split(",")[6]
+    # The response_hex is "5B 72 64 61 5D 4F 4B 35 44" which is 9 characters (7 bytes with spaces)
+    # [ = 0x5B, r = 0x72, d = 0x64, a = 0x61, ] = 0x5D, O = 0x4F, K = 0x4B, 5 = 0x35, D = 0x44
+    assert response_len == "9", f"Expected response_len=9 (hex string with spaces), got {response_len}"
+    
+    # Check response_hex matches expected
+    response_hex = lines[1].split(",")[5]
+    # [rda]OK5D in hex with spaces: 5B 72 64 61 5D 4F 4B 35 44
+    assert response_hex == "5B 72 64 61 5D 4F 4B 35 44", f"Expected [rda]OK5D in hex, got {response_hex}"
+    
+    # Cleanup
+    os.unlink("/tmp/test_successful_poll.csv")
+    
+    print("  Successful poll: OK")
+    print("  Response captured: OK")
+    print("Successful poll_motor(): PASSED\n")
+
+
+def test_poll_motor_timeout():
+    """Test poll_motor() timeout when no response is received."""
+    print("Testing poll_motor() timeout...")
+    
+    # Create FakeSerial with no responses (empty buffer)
+    h3 = FakeSerial(responses=[])
+    
+    with ReadbackPoller(h3, "/tmp/test_timeout.csv", timeout=0.05, interval=0.25) as poller:
+        poller.poll_motor("A", 512)
+    
+    # Verify timeout behavior
+    with open("/tmp/test_timeout.csv", 'r') as f:
+        lines = f.readlines()
+    
+    # Should have header + 1 data line
+    assert len(lines) == 2, f"Expected 2 lines, got {len(lines)}"
+    
+    # Check status is TIMEOUT
+    assert "TIMEOUT" in lines[1], f"Status should be TIMEOUT, got: {lines[1]}"
+    
+    # Check response_len is 0
+    response_len = lines[1].split(",")[6]
+    assert response_len == "0", f"Expected response_len=0, got {response_len}"
+    
+    # Check response_hex is empty
+    response_hex = lines[1].split(",")[5]
+    assert response_hex == "", f"Expected empty response_hex, got {response_hex}"
+    
+    # Cleanup
+    os.unlink("/tmp/test_timeout.csv")
+    
+    print("  Timeout behavior: OK")
+    print("  Status verification: OK")
+    print("Timeout test: PASSED\n")
+
+
+def test_poll_due_interval():
+    """Test poll_due() respects the polling interval with deterministic timing."""
+    print("Testing poll_due() interval...")
+    
+    import time
+    
+    # Create FakeSerial with responses for all three motors
+    # We need 6 responses: 3 for first poll, 3 for second poll
+    responses = [
+        b"[rda]OK5D",  # Motor A (poll 1)
+        b"[rdb]OK5D",  # Motor B (poll 1)
+        b"[rdc]OK5D",  # Motor C (poll 1)
+        b"[rda]OK5D",  # Motor A (poll 2)
+        b"[rdb]OK5D",  # Motor B (poll 2)
+        b"[rdc]OK5D",  # Motor C (poll 2)
+    ]
+    h3 = FakeSerial(responses=responses)
+    
+    # Use a short, deterministic interval (0.01 seconds)
+    interval = 0.01
+    
+    with ReadbackPoller(h3, "/tmp/test_interval.csv", timeout=0.1, interval=interval) as poller:
+        # positions is a string where each character is a position value
+        positions = "512512512"  # A=512, B=512, C=512
+        
+        # Call poll_due() immediately - should skip since interval not reached
+        poller.poll_due("ABC", positions)
+        
+        # Call poll_due() again immediately - should still skip
+        poller.poll_due("ABC", positions)
+    
+    # Verify only one set of entries (since we didn't wait for interval)
+    with open("/tmp/test_interval.csv", 'r') as f:
+        lines = f.readlines()
+    
+    # Should have header + 3 data lines (one for each motor, but only one poll)
+    assert len(lines) == 4, f"Expected 4 lines, got {len(lines)}"
+    
+    # Cleanup
+    os.unlink("/tmp/test_interval.csv")
+    
+    print("  Interval skip behavior: OK")
+    print("Interval test (skip): PASSED\n")
+    
+    # Now test with interval elapsed
+    responses = [
+        b"[rda]OK5D",  # Motor A (poll 1)
+        b"[rdb]OK5D",  # Motor B (poll 1)
+        b"[rdc]OK5D",  # Motor C (poll 1)
+        b"[rda]OK5D",  # Motor A (poll 2)
+        b"[rdb]OK5D",  # Motor B (poll 2)
+        b"[rdc]OK5D",  # Motor C (poll 2)
+    ]
+    h3 = FakeSerial(responses=responses)
+    
+    with ReadbackPoller(h3, "/tmp/test_interval2.csv", timeout=0.1, interval=interval) as poller:
+        positions = "512512512"  # A=512, B=512, C=512
+        
+        # Call poll_due() immediately - should skip
+        poller.poll_due("ABC", positions)
+        
+        # Wait for interval + small margin
+        time.sleep(interval + 0.01)
+        
+        # Call poll_due() again - should execute now
+        poller.poll_due("ABC", positions)
+    
+    # Verify all three motors were polled twice
+    with open("/tmp/test_interval2.csv", 'r') as f:
+        lines = f.readlines()
+    
+    # Should have header + 6 data lines (2 polls x 3 motors)
+    assert len(lines) == 7, f"Expected 7 lines, got {len(lines)}"
+    
+    # Verify responses for all three motors in second poll
+    # Check that lines 4, 5, 6 have OK status
+    for i in range(4, 7):
+        assert "OK" in lines[i], f"Line {i} should have OK status, got: {lines[i]}"
+    
+    # Cleanup
+    os.unlink("/tmp/test_interval2.csv")
+    
+    print("  Interval elapsed behavior: OK")
+    print("Interval test (after wait): PASSED\n")
+
+
+def test_poll_now_immediate():
+    """Test poll_now() immediate polling of all motors."""
+    print("Testing poll_now() immediate polling...")
+    
+    import csv
+    
+    # Create FakeSerial with responses for all three motors
+    responses = [
+        b"[rda]OK5D",  # Motor A
+        b"[rdb]OK5D",  # Motor B
+        b"[rdc]OK5D",  # Motor C
+    ]
+    h3 = FakeSerial(responses=responses)
+    
+    with ReadbackPoller(h3, "/tmp/test_now.csv", timeout=0.1, interval=0.25) as poller:
+        positions = "512512512"  # A=512, B=512, C=512
+        poller.poll_now("ABC", positions)
+    
+    # Verify responses captured for all motors
+    with open("/tmp/test_now.csv", 'r') as f:
+        lines = f.readlines()
+    
+    # Should have header + 3 data lines
+    assert len(lines) == 4, f"Expected 4 lines, got {len(lines)}"
+    
+    # Check all three motors logged
+    motors_in_log = [line.split(",")[2] for line in lines[1:]]
+    assert "A" in motors_in_log, "Motor A should be in log"
+    assert "B" in motors_in_log, "Motor B should be in log"
+    assert "C" in motors_in_log, "Motor C should be in log"
+    
+    # Cleanup
+    os.unlink("/tmp/test_now.csv")
+    
+    print("  All motors polled: OK")
+    print("  Responses captured: OK")
+    print("Immediate polling test: PASSED\n")
 
 
 def test_sweep_sequence():
