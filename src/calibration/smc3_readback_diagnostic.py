@@ -29,8 +29,10 @@ Usage:
 import argparse
 import csv
 import datetime as dt
+import io
 import os
 import signal
+import serial
 import sys
 import tempfile
 import time
@@ -59,8 +61,6 @@ DEFAULT_TIMEOUT = 0.10
 ACTIVE_TEST_SEQUENCE = [512, 513, 514, 515, 516, 520, 524]
 
 
-import io
-
 class FakeSerial:
     """Fake serial port for testing without hardware."""
 
@@ -83,6 +83,7 @@ class FakeSerial:
         self._output_buffer = io.BytesIO()
         self._write_count = 0
         self._response_index = 0
+        self._response_offset = 0  # Track offset within current response
         self._closed = False
         self._response_list = []  # List to store responses for reading
 
@@ -93,11 +94,16 @@ class FakeSerial:
         if self.write_error:
             raise IOError("Fake write error")
         self._write_count += 1
-        # Generate response if configured - return only the next response
-        if self.responses and self._response_index < len(self.responses):
-            expected_response = self.responses[self._response_index]
-            self._response_list.append(expected_response)
-            # Don't increment _response_index here - increment in read
+        # Generate response if configured - append the next response
+        if self.responses:
+            # Use a counter to track which response to return
+            if not hasattr(self, '_response_counter'):
+                self._response_counter = 0
+            if self._response_counter < len(self.responses):
+                self._response_list.append(self.responses[self._response_counter])
+                self._response_counter += 1
+                # Reset _response_offset for the new response
+                self._response_offset = 0
         return len(data)
 
     def read(self, size: int) -> bytes:
@@ -107,12 +113,18 @@ class FakeSerial:
         if self.raise_timeout:
             # Simulate timeout by always returning empty
             return b""
-        # Read from response list starting from current index
-        if self._response_index >= len(self._response_list):
+        # Read from response list - return from the last response added
+        if not self._response_list:
             return b""
-        response = self._response_list[self._response_index]
-        self._response_index += 1
-        return response[:size]
+        response = self._response_list[-1]  # Use the last response
+        # Return up to 'size' bytes from the current response
+        remaining = len(response) - self._response_offset
+        if remaining <= 0:
+            # No more data in current response
+            return b""
+        data = response[self._response_offset:self._response_offset + size]
+        self._response_offset += len(data)
+        return data
 
     def reset_input_buffer(self):
         """Clear the input buffer."""
@@ -394,6 +406,7 @@ class ReadbackDiagnostic:
             "limitations": [],
             "unresolved": []
         }
+        self.last_response = b""  # Most recent response bytes from poll_motor()
 
     def send_request(self) -> Tuple[bytes, int]:
         """Send a readback request and return (response_bytes, bytes_written)."""
@@ -439,6 +452,7 @@ class ReadbackDiagnostic:
         delay: float = 0.0
     ) -> bool:
         """Poll a single motor and return True if response received."""
+        self.last_response = b""
         self.request_counter += 1
         request_id = self.request_counter
         request = READ_COMMANDS[self.motor]
@@ -504,6 +518,7 @@ class ReadbackDiagnostic:
 
             # Analyze response
             status = "OK" if response else "TIMEOUT"
+            self.stats["total_requests"] += 1
             if status == "OK":
                 self.stats["successful"] += 1
                 self.stats["response_lengths"].add(response_length)
@@ -520,9 +535,11 @@ class ReadbackDiagnostic:
                 response_complete_ms, latency_ms, response_length, status, error
             )
 
+            self.last_response = bytes(response)
             return status == "OK"
 
         except Exception as e:
+            self.stats["total_requests"] += 1
             error = f"{type(e).__name__}: {e}"
             # Use default values if not set
             response_start_ms = response_start_ms or 0.0
@@ -651,10 +668,10 @@ class ReadbackDiagnostic:
 
             # Query readback
             print(f"Querying readback for {motor}...")
-            response = self.poll_motor(DEFAULT_TIMEOUT, 0.05)
+            success = self.poll_motor(DEFAULT_TIMEOUT, 0.05)
 
-            if response:
-                response_hex = " ".join(f"{b:02X}" for b in response)
+            if success:
+                response_hex = " ".join(f"{b:02X}" for b in self.last_response)
                 print(f"Response: {response_hex}")
 
                 # Log active test
@@ -711,7 +728,7 @@ def parse_motor_arg(motors: str) -> List[str]:
     return result
 
 
-def main():
+def main(argv=None, serial_factory=None):
     parser = argparse.ArgumentParser(
         description="SMC3 Readback Diagnostic Utility for DOF Reality H3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -731,12 +748,15 @@ Examples:
 
   Passive test with inter-request delay:
     python smc3_readback_diagnostic.py --port /dev/ttyUSB0 --motor A --duration 30 --delay 0.1
+
+  Simulate mode (no hardware):
+    python smc3_readback_diagnostic.py --simulate --simulate-response "5B 72 64 41 5D" --simulate-count 5 --motor A
 """
     )
 
     parser.add_argument(
         "--port",
-        required=True,
+        required=False,  # Not required if --list-devices is used
         help="Serial device path (e.g., /dev/ttyUSB0)"
     )
     parser.add_argument(
@@ -747,7 +767,7 @@ Examples:
     )
     parser.add_argument(
         "--motor",
-        required=True,
+        required=False,  # Not required if --list-devices is used
         choices=["A", "B", "C", "ALL"],
         help="Motor to poll: A, B, C, or ALL"
     )
@@ -814,8 +834,221 @@ Examples:
         action="store_true",
         help="List detected serial devices and exit"
     )
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Enable simulation mode (uses FakeSerial, no hardware required)"
+    )
+    parser.add_argument(
+        "--simulate-response",
+        action="append",
+        metavar="HEX",
+        help="Canned response in hex format (repeatable, consumed in FIFO order)"
+    )
+    parser.add_argument(
+        "--simulate-count",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Number of requests to simulate before stopping (default: 10, 0=unlimited in passive mode)"
+    )
 
-    args = parser.parse_args()
+    if argv is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(argv)
+
+    # ── Simulate mode branch (early exit, before hardware-dependent code) ─
+    if args.simulate:
+        # Task 3.3: --port is optional in simulate mode
+        sim_port = args.port if args.port else "/dev/null"
+        sim_responses = [
+            bytes(int(h, 16) for h in hex_str.split())
+            for hex_str in (args.simulate_response or [])
+        ]
+
+        # Determine motors: use --motor if provided, else --active-motor, else default "A"
+        if args.motor:
+            motors = parse_motor_arg(args.motor)
+        elif args.active_motor:
+            motors = [args.active_motor]
+        else:
+            motors = ["A"]
+
+        # Active test targets
+        active_targets = ACTIVE_TEST_SEQUENCE[:]
+
+        print("\n" + "=" * 70)
+        print("SIMULATION MODE — no hardware connected")
+        print("=" * 70)
+        print(f"Port: {sim_port}")
+        print(f"Baud: {args.baud}")
+        print(f"Motors: {motors}")
+        print(f"Mode: {'ACTIVE' if args.active_target_test else 'PASSIVE'}")
+        if args.active_target_test:
+            print(f"Active Test Motors: {args.active_motor}")
+            print(f"Active Test Targets: {active_targets}")
+            print(f"Settling Delay: {args.active_settle}s")
+        else:
+            print(f"Simulate Count: {args.simulate_count}")
+            print(f"Polling Rate: {args.polling_rate} Hz")
+        print(f"Read Timeout: {args.read_timeout}s")
+        print(f"Write Timeout: {args.write_timeout}s")
+        print(f"Canned Responses: {len(sim_responses)}")
+        print("=" * 70 + "\n")
+
+        # No-op DiagnosticSession subclass — overrides all file-writing methods
+        class _SimulateSession(DiagnosticSession):
+            """No-op DiagnosticSession for simulate mode.
+
+            Overrides every method that would write CSV, raw, or summary files.
+            This avoids modifying DiagnosticSession itself while ensuring
+            zero disk I/O during simulation.
+            """
+            def _setup_output_files(self):
+                pass  # no CSV or raw files in simulation
+            def write_summary(self, stats):
+                pass  # summary printed to stdout instead
+            def log_request(self, *a, **kw):
+                pass
+            def log_raw_serial(self, *a, **kw):
+                pass
+            def log_decoded(self, *a, **kw):
+                pass
+            def log_active_test(self, *a, **kw):
+                pass
+
+        # Task 2.1: serial_factory producing FakeSerial (or injected factory for tests)
+        def sim_factory(port=sim_port, baudrate=args.baud,
+                        timeout=args.read_timeout, responses=sim_responses):
+            if serial_factory is not None:
+                return serial_factory(
+                    port=port, baudrate=baudrate,
+                    timeout=timeout, responses=responses
+                )
+            return FakeSerial(
+                port=port, baudrate=baudrate,
+                timeout=timeout, responses=responses
+            )
+
+        # Task 2.3: request counter stops at --simulate-count
+        simulate_count = args.simulate_count  # 0 = unlimited in passive, fixed in active
+        request_counter = [0]  # mutable container for closure
+
+        def _request_limit_reached():
+            if simulate_count == 0:
+                return False
+            return request_counter[0] >= simulate_count
+
+        try:
+            with _SimulateSession(Path("smc3_diagnostic_output"), verbose=args.verbose) as session:
+                ser = sim_factory()
+                session.serial = ser
+
+                diagnostic = ReadbackDiagnostic(session, ser, args.motor if args.motor else args.active_motor, verbose=args.verbose)
+
+                if args.active_target_test:
+                    # Active-target-test mode: fixed sequence, --simulate-count limits steps
+                    print("\nStarting active target-resolution test (SIMULATION)...")
+                    targets = active_targets[:]
+                    if simulate_count > 0:
+                        targets = targets[:simulate_count]
+                    diagnostic.run_active(args.active_motor, targets, args.active_settle)
+                else:
+                    # Passive mode: round-robin motor distribution for ALL
+                    if args.motor == "ALL":
+                        motor_cycle = ["A", "B", "C"]
+                        print(f"\nStarting passive polling (SIMULATION) — round-robin motors...")
+                        print(f"Simulate Count: {simulate_count}")
+                        print(f"Polling Rate: {args.polling_rate} Hz")
+                        interval = 1.0 / args.polling_rate if args.polling_rate > 0 else DEFAULT_POLL_INTERVAL
+                        start = time.monotonic()
+                        last_poll = start
+                        motor_index = 0
+                        # Use a shared stats dict across motor instances
+                        diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=args.verbose)
+                        while not _request_limit_reached():
+                            now = time.monotonic()
+                            if now - last_poll >= interval:
+                                motor = motor_cycle[motor_index % 3]
+                                # Create fresh diagnostic for each motor to avoid
+                                # READ_COMMANDS["ALL"] KeyError
+                                diag_motor = ReadbackDiagnostic(
+                                    session, ser, motor, verbose=args.verbose
+                                )
+                                # Merge stats from previous iteration
+                                diag_motor.stats.update(diagnostic.stats)
+                                diag_motor.request_counter = diagnostic.request_counter
+                                request_counter[0] += 1
+                                diag_motor.running = True
+                                diag_motor.poll_motor(DEFAULT_TIMEOUT, interval, args.delay)
+                                diagnostic = diag_motor
+                                motor_index += 1
+                                last_poll = now
+                            time.sleep(0.01)
+                        diagnostic.running = False
+                    else:
+                        # Non-ALL passive mode: single motor, respect simulate-count
+                        print("\nStarting passive readback polling (SIMULATION)...")
+                        interval = 1.0 / args.polling_rate if args.polling_rate > 0 else DEFAULT_POLL_INTERVAL
+                        start = time.monotonic()
+                        last_poll = start
+                        diagnostic.running = True
+                        while diagnostic.running and not _request_limit_reached():
+                            now = time.monotonic()
+                            if now - last_poll >= interval:
+                                diagnostic.request_counter += 1
+                                request_counter[0] += 1
+                                diagnostic.poll_motor(DEFAULT_TIMEOUT, interval, args.delay)
+                                last_poll = now
+                            time.sleep(0.01)
+                        diagnostic.running = False
+
+                # Task 5.1: Print summary to stdout instead of file
+                stats = diagnostic.stats
+                stats["port"] = sim_port
+                stats["baud"] = args.baud
+                stats["read_timeout"] = args.read_timeout
+                stats["write_timeout"] = args.write_timeout
+                stats["mode"] = "SIMULATION_" + (args.active_target_test and "ACTIVE" or "PASSIVE")
+                stats["motors"] = ",".join(motors)
+                stats["duration"] = args.duration
+                stats["polling_rate"] = args.polling_rate
+                stats["interval"] = 1.0 / args.polling_rate
+                stats["delay"] = args.delay
+                stats["response_lengths"] = sorted(list(stats["response_lengths"]))
+                stats["simulate_count"] = simulate_count
+                stats["format_established"] = stats["format_established"]
+                stats["sufficient_for_settling"] = "UNKNOWN - Simulation mode"
+                stats["limitations"] = ["Simulation mode — no real hardware data"]
+                stats["unresolved"] = ["Simulation mode — no real hardware data"]
+
+                # Task 5.1, 5.2: Print summary to stdout
+                print("\n" + "=" * 70)
+                print("SIMULATION SUMMARY")
+                print("=" * 70)
+                print(f"Mode: SIMULATION")
+                print(f"Total Requests: {stats['total_requests']}")
+                print(f"Successful Responses: {stats['successful']}")
+                print(f"Timeouts: {stats['timeouts']}")
+                print(f"Malformed/Incomplete: {stats['malformed']}")
+                print(f"Errors: {stats['errors']}")
+                print(f"Motors: {stats['motors']}")
+                print(f"Simulate Count: {stats['simulate_count']}")
+                print("=" * 70)
+
+                return 0
+
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user. Cleaning up...")
+            return 130
+
+        except Exception as e:
+            print(f"\nError: {e}")
+            import traceback
+            if args.verbose:
+                traceback.print_exc()
+            return 1
 
     # List devices if requested
     if args.list_devices:
@@ -839,24 +1072,26 @@ Examples:
         if args.motor != args.active_motor:
             print("Warning: --motor and --active-motor differ. Using --active-motor for active test.")
 
-    # Parse motors
-    motors = parse_motor_arg(args.motor)
-    if not motors:
-        parser.error("--motor must contain A, B, C, or ALL")
+    # Parse motors (only if not listing devices)
+    if not args.list_devices:
+        motors = parse_motor_arg(args.motor)
+        if not motors:
+            parser.error("--motor must contain A, B, C, or ALL")
 
-    # Validate polling rate
-    if args.polling_rate <= 0:
-        parser.error("--polling-rate must be > 0")
+        # Validate polling rate
+        if args.polling_rate <= 0:
+            parser.error("--polling-rate must be > 0")
 
-    # Validate active test targets
-    active_targets = ACTIVE_TEST_SEQUENCE[:]
+        # Validate active test targets
+        active_targets = ACTIVE_TEST_SEQUENCE[:]
 
-    # Create output directory
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-    else:
-        output_dir = Path("smc3_diagnostic_output")
+        # Create output directory
+        if args.output_dir:
+            output_dir = Path(args.output_dir)
+        else:
+            output_dir = Path("smc3_diagnostic_output")
 
+    # ── Real-hardware branch (unchanged) ──────────────────────────────
     # Detect serial info
     devices = detect_serial_info()
     port_info = devices.get(args.port, {})
@@ -899,80 +1134,81 @@ Examples:
 
     print("=" * 70 + "\n")
 
-    # Create session
-    session = DiagnosticSession(output_dir, verbose=args.verbose)
-
+    # Create session and use as context manager
     try:
-        # Open serial port
-        print(f"Opening serial port: {args.port}")
-        serial = FakeSerial(
-            port=args.port,
-            baudrate=args.baud,
-            timeout=args.read_timeout,
-            write_timeout=args.write_timeout
-        )
+        with DiagnosticSession(output_dir, verbose=args.verbose) as session:
+            # Open serial port
+            print(f"Opening serial port: {args.port}")
+            # Use real serial port for normal execution, or injected factory for tests
+            factory = serial_factory or serial.Serial
+            ser = factory(
+                port=args.port,
+                baudrate=args.baud,
+                timeout=args.read_timeout,
+                write_timeout=args.write_timeout
+            )
+            # Store serial in session for cleanup
+            session.serial = ser
 
-        # Create diagnostic engine
-        diagnostic = ReadbackDiagnostic(session, serial, args.motor, verbose=args.verbose)
+            # Create diagnostic engine
+            diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
 
-        # Run test
-        if args.active_target_test:
-            # Active test mode
-            print("\nStarting active target-resolution test...")
-            diagnostic.run_active(args.active_motor, active_targets, args.active_settle)
-        else:
-            # Passive test mode
-            print("\nStarting passive readback polling...")
-            diagnostic.run_passive(args.duration, args.polling_rate, args.delay)
+            # Run test
+            if args.active_target_test:
+                # Active test mode
+                print("\nStarting active target-resolution test...")
+                diagnostic.run_active(args.active_motor, active_targets, args.active_settle)
+            else:
+                # Passive test mode
+                print("\nStarting passive readback polling...")
+                diagnostic.run_passive(args.duration, args.polling_rate, args.delay)
 
-        # Write summary
-        stats = diagnostic.stats
-        stats["port"] = args.port
-        stats["baud"] = args.baud
-        stats["read_timeout"] = args.read_timeout
-        stats["write_timeout"] = args.write_timeout
-        stats["mode"] = args.active_target_test and "ACTIVE" or "PASSIVE"
-        stats["motors"] = ",".join(motors)
-        stats["duration"] = args.duration
-        stats["polling_rate"] = args.polling_rate
-        stats["interval"] = 1.0 / args.polling_rate
-        stats["delay"] = args.delay
-        stats["response_lengths"] = sorted(list(stats["response_lengths"]))
-        stats["format_established"] = stats["format_established"]
-        stats["sufficient_for_settling"] = "UNKNOWN - No valid readback data"
-        stats["limitations"] = [
-            "Response format not conclusively established from raw data",
-            "Resolution analysis pending actual controller data",
-            "±2-unit settling verification cannot be determined without valid readback"
-        ]
-        stats["unresolved"] = [
-            "Exact response framing unknown",
-            "Position encoding (binary vs ASCII) unknown",
-            "Scaling factors unknown",
-            "Effective resolution unknown"
-        ]
+            # Write summary
+            stats = diagnostic.stats
+            stats["port"] = args.port
+            stats["baud"] = args.baud
+            stats["read_timeout"] = args.read_timeout
+            stats["write_timeout"] = args.write_timeout
+            stats["mode"] = args.active_target_test and "ACTIVE" or "PASSIVE"
+            stats["motors"] = ",".join(motors)
+            stats["duration"] = args.duration
+            stats["polling_rate"] = args.polling_rate
+            stats["interval"] = 1.0 / args.polling_rate
+            stats["delay"] = args.delay
+            stats["response_lengths"] = sorted(list(stats["response_lengths"]))
+            stats["format_established"] = stats["format_established"]
+            stats["sufficient_for_settling"] = "UNKNOWN - No valid readback data"
+            stats["limitations"] = [
+                "Response format not conclusively established from raw data",
+                "Resolution analysis pending actual controller data",
+                "±2-unit settling verification cannot be determined without valid readback"
+            ]
+            stats["unresolved"] = [
+                "Exact response framing unknown",
+                "Position encoding (binary vs ASCII) unknown",
+                "Scaling factors unknown",
+                "Effective resolution unknown"
+            ]
 
-        session.write_summary(stats)
+            session.write_summary(stats)
 
-        print("\n" + "=" * 70)
-        print("DIAGNOSTIC COMPLETE")
-        print("=" * 70)
-        print(f"Total Requests: {stats['total_requests']}")
-        print(f"Successful: {stats['successful']}")
-        print(f"Timeouts: {stats['timeouts']}")
-        print(f"Malformed: {stats['malformed']}")
-        print(f"Errors: {stats['errors']}")
-        print(f"Output Directory: {output_dir}")
-        print("\nGenerated files:")
-        for f in output_dir.iterdir():
-            print(f"  {f.name}")
+            print("\n" + "=" * 70)
+            print("DIAGNOSTIC COMPLETE")
+            print("=" * 70)
+            print(f"Total Requests: {stats['total_requests']}")
+            print(f"Successful: {stats['successful']}")
+            print(f"Timeouts: {stats['timeouts']}")
+            print(f"Malformed: {stats['malformed']}")
+            print(f"Errors: {stats['errors']}")
+            print(f"Output Directory: {output_dir}")
+            print("\nGenerated files:")
+            for f in output_dir.iterdir():
+                print(f"  {f.name}")
 
-        return 0
+            return 0
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user. Cleaning up...")
-        session._cleanup()
-        print("Diagnostic interrupted.")
         return 130
 
     except Exception as e:
@@ -980,7 +1216,6 @@ Examples:
         import traceback
         if args.verbose:
             traceback.print_exc()
-        session._cleanup()
         return 1
 
 
