@@ -222,7 +222,9 @@ def test_diagnostic_session_files():
             target_raw=512,
             feedback_decoded=512.0,
             target_decoded=512.0,
-            decode_status="OK"
+            decode_status="OK",
+            payload_byte_1_raw=128,
+            payload_byte_2_raw=128
         )
 
         # Verify files have content
@@ -1784,6 +1786,388 @@ def test_poll_motor_exception_clears_last_response():
             session._cleanup()
 
     print("TEST PASSED\n")
+
+
+# ============================================================================
+# Payload extraction and scaling tests (Tasks 5.1–5.10)
+# ============================================================================
+
+
+def test_payload_extraction_standard():
+    """Task 5.1: Verify payload extraction for standard response 5B 41 7E 80 5D."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Standard Response")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        response = bytes([0x5B, 0x41, 0x7E, 0x80, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+                row = next(reader)
+
+            # Verify column values
+            assert row[4] == "126", f"feedback_raw expected 126, got {row[4]}"       # payload_byte_1_raw
+            assert row[5] == "128", f"target_raw expected 128, got {row[5]}"         # payload_byte_2_raw
+            assert row[6] == "504", f"feedback_decoded expected 504, got {row[6]}"   # 126*4
+            assert row[7] == "512", f"target_decoded expected 512, got {row[7]}"     # 128*4
+            assert row[8] == "OK", f"decode_status expected OK, got {row[8]}"
+            assert row[9] == "126", f"payload_byte_1_raw expected 126, got {row[9]}"
+            assert row[10] == "128", f"payload_byte_2_raw expected 128, got {row[10]}"
+
+            print("  ✓ payload_byte_1_raw = 126 (0x7E)")
+            print("  ✓ payload_byte_2_raw = 128 (0x80)")
+            print("  ✓ feedback_raw = 126, target_raw = 128")
+            print("  ✓ feedback_decoded = 504, target_decoded = 512")
+            print("  ✓ decode_status = OK")
+            print("TEST PASSED\n")
+
+
+def test_payload_extraction_zero():
+    """Task 5.2: Verify payload extraction for zero response 5B 41 00 00 5D."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Zero Values")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        response = bytes([0x5B, 0x41, 0x00, 0x00, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[4] == "0", f"feedback_raw expected 0, got {row[4]}"
+            assert row[5] == "0", f"target_raw expected 0, got {row[5]}"
+            assert row[6] == "0", f"feedback_decoded expected 0, got {row[6]}"
+            assert row[7] == "0", f"target_decoded expected 0, got {row[7]}"
+            assert row[8] == "OK", f"decode_status expected OK, got {row[8]}"
+            assert row[9] == "0", f"payload_byte_1_raw expected 0, got {row[9]}"
+            assert row[10] == "0", f"payload_byte_2_raw expected 0, got {row[10]}"
+
+            print("  ✓ All fields = 0 for zero response")
+            print("  ✓ decode_status = OK")
+            print("TEST PASSED\n")
+
+
+def test_payload_extraction_max():
+    """Task 5.3: Verify payload extraction for max response 5B 41 FF FF 5D."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Maximum Values")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        response = bytes([0x5B, 0x41, 0xFF, 0xFF, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[4] == "255", f"feedback_raw expected 255, got {row[4]}"
+            assert row[5] == "255", f"target_raw expected 255, got {row[5]}"
+            assert row[6] == "1020", f"feedback_decoded expected 1020, got {row[6]}"
+            assert row[7] == "1020", f"target_decoded expected 1020, got {row[7]}"
+            assert row[8] == "OK", f"decode_status expected OK, got {row[8]}"
+            assert row[9] == "255", f"payload_byte_1_raw expected 255, got {row[9]}"
+            assert row[10] == "255", f"payload_byte_2_raw expected 255, got {row[10]}"
+
+            print("  ✓ payload_byte_1_raw = 255, payload_byte_2_raw = 255")
+            print("  ✓ feedback_decoded = 1020, target_decoded = 1020")
+            print("  ✓ decode_status = OK")
+            print("TEST PASSED\n")
+
+
+def test_payload_extraction_motor_b():
+    """Task 5.4: Verify payload extraction for Motor B response 5B 42 64 C8 5D."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Motor B")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        response = bytes([0x5B, 0x42, 0x64, 0xC8, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "B", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[4] == "100", f"feedback_raw expected 100, got {row[4]}"
+            assert row[5] == "200", f"target_raw expected 200, got {row[5]}"
+            assert row[6] == "400", f"feedback_decoded expected 400, got {row[6]}"
+            assert row[7] == "800", f"target_decoded expected 800, got {row[7]}"
+            assert row[8] == "OK", f"decode_status expected OK, got {row[8]}"
+            assert row[9] == "100", f"payload_byte_1_raw expected 100, got {row[9]}"
+            assert row[10] == "200", f"payload_byte_2_raw expected 200, got {row[10]}"
+
+            print("  ✓ payload_byte_1_raw = 100 (0x64), payload_byte_2_raw = 200 (0xC8)")
+            print("  ✓ feedback_decoded = 400, target_decoded = 800")
+            print("  ✓ decode_status = OK")
+            print("TEST PASSED\n")
+
+
+def test_payload_extraction_motor_c():
+    """Task 5.5: Verify payload extraction for Motor C response 5B 43 40 C0 5D."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Motor C")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        response = bytes([0x5B, 0x43, 0x40, 0xC0, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "C", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[4] == "64", f"feedback_raw expected 64, got {row[4]}"
+            assert row[5] == "192", f"target_raw expected 192, got {row[5]}"
+            assert row[6] == "256", f"feedback_decoded expected 256, got {row[6]}"
+            assert row[7] == "768", f"target_decoded expected 768, got {row[7]}"
+            assert row[8] == "OK", f"decode_status expected OK, got {row[8]}"
+            assert row[9] == "64", f"payload_byte_1_raw expected 64, got {row[9]}"
+            assert row[10] == "192", f"payload_byte_2_raw expected 192, got {row[10]}"
+
+            print("  ✓ payload_byte_1_raw = 64 (0x40), payload_byte_2_raw = 192 (0xC0)")
+            print("  ✓ feedback_decoded = 256, target_decoded = 768")
+            print("  ✓ decode_status = OK")
+            print("TEST PASSED\n")
+
+
+def test_payload_extraction_invalid_framing():
+    """Task 5.6: Verify invalid framing produces ERROR decode_status."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Invalid Framing")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        # 4-byte response missing end delimiter: 5B 41 7E 5D
+        response = bytes([0x5B, 0x41, 0x7E, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[8] == "ERROR", f"decode_status expected ERROR, got {row[8]}"
+            assert row[4] == "0", f"feedback_raw expected 0, got {row[4]}"
+            assert row[5] == "0", f"target_raw expected 0, got {row[5]}"
+            assert row[6] == "", f"feedback_decoded expected empty, got {row[6]}"
+            assert row[7] == "", f"target_decoded expected empty, got {row[7]}"
+
+            print("  ✓ decode_status = ERROR for invalid framing")
+            print("  ✓ Payload fields not populated")
+            print("TEST PASSED\n")
+
+
+def test_payload_extraction_wrong_motor():
+    """Task 5.7: Verify wrong motor identifier produces ERROR decode_status."""
+    print("\n" + "=" * 60)
+    print("TEST: Payload Extraction - Wrong Motor Identifier")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        # Motor B response when requesting Motor A: 5B 42 7E 80 5D
+        response = bytes([0x5B, 0x42, 0x7E, 0x80, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[8] == "ERROR", f"decode_status expected ERROR, got {row[8]}"
+            assert row[4] == "0", f"feedback_raw expected 0, got {row[4]}"
+            assert row[5] == "0", f"target_raw expected 0, got {row[5]}"
+            assert row[6] == "", f"feedback_decoded expected empty, got {row[6]}"
+            assert row[7] == "", f"target_decoded expected empty, got {row[7]}"
+
+            print("  ✓ decode_status = ERROR for wrong motor identifier")
+            print("  ✓ Payload fields not populated")
+            print("TEST PASSED\n")
+
+
+def test_raw_response_preserved():
+    """Task 5.8: Verify raw_response contains full original response bytes."""
+    print("\n" + "=" * 60)
+    print("TEST: Raw Response Preservation")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        response = bytes([0x5B, 0x41, 0x7E, 0x80, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[2] == "5B 41 7E 80 5D", \
+                f"raw_response expected '5B 41 7E 80 5D', got {row[2]}"
+
+            print("  ✓ raw_response = '5B 41 7E 80 5D'")
+            print("TEST PASSED\n")
+
+
+def test_framing_valid_flag():
+    """Task 5.9: Verify framing_valid is 'true' for valid and 'false' for invalid."""
+    print("\n" + "=" * 60)
+    print("TEST: Framing Valid Flag")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        # Test valid framing
+        valid_response = bytes([0x5B, 0x41, 0x7E, 0x80, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[valid_response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[3] == "true", f"framing_valid expected 'true', got {row[3]}"
+            print("  ✓ framing_valid = 'true' for valid response")
+
+        # Test invalid framing (missing end byte)
+        output_dir2 = Path(tmpdir) / "test_output2"
+        invalid_response = bytes([0x5B, 0x41, 0x7E, 0x80])
+        with FakeSerial(port="/dev/ttyACM0", responses=[invalid_response]) as ser:
+            session2 = DiagnosticSession(output_dir2)
+            diagnostic2 = ReadbackDiagnostic(session2, ser, "A", verbose=False)
+
+            diagnostic2.poll_motor(timeout=0.1, interval=0.1)
+
+            with open(session2.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                next(reader)
+                row = next(reader)
+
+            assert row[3] == "false", f"framing_valid expected 'false', got {row[3]}"
+            print("  ✓ framing_valid = 'false' for invalid response")
+
+        print("TEST PASSED\n")
+
+
+def test_csv_headers_include_new_columns():
+    """Task 5.10: Verify CSV headers contain all new columns."""
+    print("\n" + "=" * 60)
+    print("TEST: CSV Headers Include New Columns")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        # Create a session and write one row to trigger header creation
+        response = bytes([0x5B, 0x41, 0x7E, 0x80, 0x5D])
+        with FakeSerial(port="/dev/ttyACM0", responses=[response]) as ser:
+            session = DiagnosticSession(output_dir)
+            diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=False)
+
+            diagnostic.poll_motor(timeout=0.1, interval=0.1)
+
+            # Verify decoded CSV headers
+            with open(session.decoded_file, "r") as f:
+                reader = csv.reader(f)
+                headers = next(reader)
+
+            expected_decoded_headers = [
+                "request_id", "motor", "raw_response", "framing_valid",
+                "feedback_raw", "target_raw", "feedback_decoded", "target_decoded",
+                "decode_status", "payload_byte_1_raw", "payload_byte_2_raw"
+            ]
+            assert headers == expected_decoded_headers, \
+                f"Decoded CSV headers mismatch:\n  Expected: {expected_decoded_headers}\n  Got:      {headers}"
+
+            print("  ✓ Decoded CSV headers include all new columns")
+            print(f"    Headers: {', '.join(headers)}")
+
+            # Verify active test CSV headers (write a dummy row)
+            session.log_active_test(
+                step=1, motor="A", target=512,
+                transmitted_hex="91 114 100 65 93",
+                write_result=5, readback_sample=1,
+                feedback_raw=0, target_raw=0,
+                feedback_decoded=None, target_decoded=None,
+                timestamp="2026-01-01T00:00:00",
+                decode_status="OK",
+                payload_byte_1_raw=0, payload_byte_2_raw=0
+            )
+
+            with open(session.active_file, "r") as f:
+                reader = csv.reader(f)
+                active_headers = next(reader)
+
+            assert "feedback_decoded" in active_headers, "Missing feedback_decoded in active test CSV"
+            assert "target_decoded" in active_headers, "Missing target_decoded in active test CSV"
+            assert "decode_status" in active_headers, "Missing decode_status in active test CSV"
+            assert "payload_byte_1_raw" in active_headers, "Missing payload_byte_1_raw in active test CSV"
+            assert "payload_byte_2_raw" in active_headers, "Missing payload_byte_2_raw in active test CSV"
+
+            print("  ✓ Active test CSV headers include all new columns")
+            print(f"    Headers: {', '.join(active_headers)}")
+
+            print("TEST PASSED\n")
 
 
 def run_all_tests():
