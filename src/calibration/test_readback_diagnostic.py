@@ -631,7 +631,7 @@ def test_cli_help():
 
 def test_normal_execution_uses_real_serial():
     """Regression test: verify normal CLI execution uses real serial.Serial, not FakeSerial.
-    
+
     This test ensures that when main() is called without a serial_factory parameter,
     it uses serial.Serial (the real pyserial implementation) rather than FakeSerial.
     """
@@ -674,7 +674,7 @@ def test_normal_execution_uses_real_serial():
 
 def test_serial_factory_injection():
     """Test that serial_factory parameter allows test injection.
-    
+
     Tests can pass a custom serial_factory (e.g., FakeSerial) to main()
     for testing without hardware.
     """
@@ -710,7 +710,7 @@ def test_serial_factory_injection():
 
 def test_serial_constructor_arguments():
     """Test that serial constructor arguments are passed correctly.
-    
+
     This test verifies that the serial port is opened with the correct
     arguments: port, baud rate, read timeout, and write timeout.
     """
@@ -720,34 +720,34 @@ def test_serial_constructor_arguments():
 
     # Verify that the source code passes correct arguments to serial.Serial
     source = inspect.getsource(main)
-    
+
     # Check for port argument
     assert 'port=args.port' in source, \
         "main() should pass port=args.port to serial.Serial"
     print("  ✓ port=args.port is passed")
-    
+
     # Check for baudrate argument
     assert 'baudrate=args.baud' in source, \
         "main() should pass baudrate=args.baud to serial.Serial"
     print("  ✓ baudrate=args.baud is passed")
-    
+
     # Check for timeout argument (read timeout)
     assert 'timeout=args.read_timeout' in source, \
         "main() should pass timeout=args.read_timeout to serial.Serial"
     print("  ✓ timeout=args.read_timeout is passed")
-    
+
     # Check for write_timeout argument
     assert 'write_timeout=args.write_timeout' in source, \
         "main() should pass write_timeout=args.write_timeout to serial.Serial"
     print("  ✓ write_timeout=args.write_timeout is passed")
-    
+
     print("  ✓ All serial constructor arguments are passed correctly")
     print("TEST PASSED\n")
 
 
 def test_normal_passive_cli_execution():
     """Integration test: exercise complete CLI execution path with injected FakeSerial.
-    
+
     This test calls main() with valid CLI arguments and serial_factory injected,
     verifying the complete execution path: argument parsing -> factory selection ->
     serial opening -> diagnostic creation -> polling -> cleanup.
@@ -767,17 +767,17 @@ def test_normal_passive_cli_execution():
             self.writes = []
             self.reads = []
             self.flushes = []
-        
+
         def write(self, data):
             self.writes.append(data)
             result = super().write(data)
             return result
-        
+
         def read(self, size):
             data = super().read(size)
             self.reads.append(data)
             return data
-        
+
         def flush(self):
             self.flushes.append(True)
             return super().flush()
@@ -890,7 +890,7 @@ def test_normal_passive_cli_execution():
             requests_file = f
             break
         assert requests_file is not None, "No requests CSV file found"
-        
+
         with open(requests_file, "r") as f:
             header = f.readline().strip()
             expected_header = "request_id,timestamp,monotonic_ts,motor,request_hex,bytes_written,write_duration_ms,response_start_ms,response_complete_ms,latency_ms,response_length,status,error"
@@ -909,7 +909,7 @@ def test_normal_passive_cli_execution():
             raw_log_file = f
             break
         assert raw_log_file is not None, "No raw serial log found"
-        
+
         with open(raw_log_file, "r") as f:
             lines = f.readlines()
             tx_count = sum(1 for line in lines if "TX" in line)
@@ -926,7 +926,7 @@ def test_normal_passive_cli_execution():
             summary_file = f
             break
         assert summary_file is not None, "No summary file found"
-        
+
         with open(summary_file, "r") as f:
             content = f.read()
             assert "SMC3 READBACK DIAGNOSTIC SUMMARY" in content
@@ -946,7 +946,7 @@ def test_normal_passive_cli_execution():
 
 def test_single_motor_cli_execution():
     """Integration test: verify only selected motor is polled.
-    
+
     When motor=A is specified, only [rdA] commands are sent, not [rdB] or [rdC].
     """
     print("\n" + "=" * 60)
@@ -995,7 +995,7 @@ def test_single_motor_cli_execution():
             assert cmd == READ_COMMANDS["A"], f"Expected [rdA], got {cmd}"
             assert cmd != READ_COMMANDS["B"], f"Motor B command [rdB] should not be sent"
             assert cmd != READ_COMMANDS["C"], f"Motor C command [rdC] should not be sent"
-        
+
         print(f"  ✓ Only {len(sent_commands)} [rdA] commands sent")
         print("  ✓ No [rdB] or [rdC] commands sent")
 
@@ -1005,7 +1005,7 @@ def test_single_motor_cli_execution():
 
 def test_exception_cleanup_with_injected_failure():
     """Integration test: verify cleanup on exception with injected failure.
-    
+
     Injects a failure during polling and verifies:
     - Error is handled correctly
     - Original error is reported
@@ -1021,7 +1021,7 @@ def test_exception_cleanup_with_injected_failure():
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             self.write_count = 0
-        
+
         def write(self, data):
             self.write_count += 1
             if self.write_count >= 2:
@@ -1071,7 +1071,7 @@ def test_exception_cleanup_with_injected_failure():
         print(f"  DEBUG: summary_files = {summary_files}")
         assert len(summary_files) > 0, "Summary file was not created"
         summary_file = summary_files[0]
-        
+
         with open(summary_file, "r") as f:
             content = f.read()
             assert "ERROR" in content or "error" in content.lower()
@@ -1083,7 +1083,7 @@ def test_exception_cleanup_with_injected_failure():
 
 def test_factory_selection_used_not_fallback():
     """Integration test: verify injected serial_factory is used, not fallback to real Serial.
-    
+
     This test verifies that:
     - The injected factory is actually called
     - The returned instance is used
@@ -1266,14 +1266,14 @@ def test_no_motor_movement_in_passive():
 
 def test_no_serial_module_shadowing():
     """Regression test: verify that the local serial connection variable doesn't shadow the serial module.
-    
+
     This test catches the UnboundLocalError that occurs when a local variable named 'serial'
     shadows the imported pyserial module. The error happens at line:
         factory = serial_factory or serial.Serial
-    
+
     If 'serial' is assigned anywhere before this line, Python treats it as a local variable,
     causing an UnboundLocalError when trying to access serial.Serial before assignment.
-    
+
     The fix renames the local variable from 'serial' to 'ser' to avoid this shadowing.
     """
     print("\n" + "=" * 60)
@@ -1282,13 +1282,13 @@ def test_no_serial_module_shadowing():
 
     import inspect
     source = inspect.getsource(main)
-    
+
     # Check that the local variable is NOT named 'serial'
     # We look for patterns where 'serial' is assigned (not just referenced)
     lines = source.split('\n')
     serial_assignment_found = False
     serial_assignment_line = None
-    
+
     for i, line in enumerate(lines):
         # Look for assignments to 'serial' (but not 'serial_factory' or 'serial.Serial')
         stripped = line.strip()
@@ -1296,25 +1296,25 @@ def test_no_serial_module_shadowing():
             serial_assignment_found = True
             serial_assignment_line = i
             break
-    
+
     assert not serial_assignment_found, \
         f"Local variable 'serial' shadows the module! Found at line {serial_assignment_line + 1}:\n  {lines[serial_assignment_line]}"
     print("  ✓ No local variable shadows 'serial' module")
-    
+
     # Verify that 'ser' is used instead (or similar unambiguous name)
     assert 'ser = factory(' in source or 'serial_conn = factory(' in source or 'serial_port = factory(' in source, \
         "Local serial connection should use an unambiguous name like 'ser'"
     print("  ✓ Local serial connection uses unambiguous variable name")
-    
+
     # Verify that serial.Serial is still referenced correctly
     assert 'serial.Serial' in source, "serial.Serial should still be referenced"
     print("  ✓ serial.Serial is correctly referenced")
-    
+
     # Verify the factory selection pattern is preserved
     assert 'serial_factory or serial.Serial' in source, \
         "Factory selection pattern should be preserved"
     print("  ✓ Factory selection pattern preserved")
-    
+
     print("  ✓ No UnboundLocalError risk from variable shadowing")
     print("TEST PASSED\n")
 

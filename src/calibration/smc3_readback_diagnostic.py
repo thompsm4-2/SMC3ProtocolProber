@@ -900,7 +900,7 @@ Examples:
         # No-op DiagnosticSession subclass — overrides all file-writing methods
         class _SimulateSession(DiagnosticSession):
             """No-op DiagnosticSession for simulate mode.
-            
+
             Overrides every method that would write CSV, raw, or summary files.
             This avoids modifying DiagnosticSession itself while ensuring
             zero disk I/O during simulation.
