@@ -189,7 +189,7 @@ class DiagnosticSession:
             writer.writerow([
                 "request_id", "motor", "raw_response", "framing_valid",
                 "feedback_raw", "target_raw", "feedback_decoded", "target_decoded",
-                "decode_status"
+                "decode_status", "payload_byte_1_raw", "payload_byte_2_raw"
             ])
         if self.active_file.exists():
             self.active_file.unlink()
@@ -198,7 +198,8 @@ class DiagnosticSession:
             writer.writerow([
                 "step", "motor", "target", "transmitted_hex", "write_result",
                 "readback_sample", "feedback_raw", "target_raw",
-                "feedback_decoded", "target_decoded", "timestamp", "error"
+                "feedback_decoded", "target_decoded", "timestamp", "error",
+                "decode_status", "payload_byte_1_raw", "payload_byte_2_raw"
             ])
 
     def __enter__(self):
@@ -273,7 +274,9 @@ class DiagnosticSession:
         target_raw: int,
         feedback_decoded: Optional[float],
         target_decoded: Optional[float],
-        decode_status: str
+        decode_status: str,
+        payload_byte_1_raw: int,
+        payload_byte_2_raw: int
     ):
         """Log decoded readback data."""
         with open(self.decoded_file, "a", newline="") as f:
@@ -284,7 +287,8 @@ class DiagnosticSession:
                 feedback_raw, target_raw,
                 f"{feedback_decoded}" if feedback_decoded is not None else "",
                 f"{target_decoded}" if target_decoded is not None else "",
-                decode_status
+                decode_status,
+                payload_byte_1_raw, payload_byte_2_raw
             ])
 
     def log_active_test(
@@ -300,7 +304,10 @@ class DiagnosticSession:
         feedback_decoded: Optional[float],
         target_decoded: Optional[float],
         timestamp: str,
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        decode_status: str = "",
+        payload_byte_1_raw: int = 0,
+        payload_byte_2_raw: int = 0
     ):
         """Log active test step."""
         with open(self.active_file, "a", newline="") as f:
@@ -310,7 +317,8 @@ class DiagnosticSession:
                 readback_sample, feedback_raw, target_raw,
                 f"{feedback_decoded}" if feedback_decoded is not None else "",
                 f"{target_decoded}" if target_decoded is not None else "",
-                timestamp, error if error else ""
+                timestamp, error if error else "",
+                decode_status, payload_byte_1_raw, payload_byte_2_raw
             ])
 
     def write_summary(self, stats: Dict[str, Any]):
@@ -571,12 +579,49 @@ class ReadbackDiagnostic:
         else:
             framing["is_readback_response"] = False
 
+        # Validate SMC3 readback response format: [motor_byte payload_1 payload_2]
+        # Format: 0x5B motor_id payload_1 payload_2 0x5D
+        # Length must be 5, start byte 0x5B (91), end byte 0x5D (93)
+        # Motor byte must match expected motor
+        valid = (
+            len(response) == 5
+            and response[0] == 0x5B  # 91 = '['
+            and response[4] == 0x5D  # 93 = ']'
+            and response[1] in (0x41, 0x42, 0x43)  # 'A', 'B', 'C'
+        )
+        if valid:
+            # Check motor identifier matches expected motor
+            expected_motor_byte = ord(self.motor)
+            if response[1] != expected_motor_byte:
+                valid = False
+
+        # Extract payload bytes only from fully validated responses
+        if valid:
+            payload_byte_1_raw = response[2]
+            payload_byte_2_raw = response[3]
+            feedback_raw = payload_byte_1_raw
+            target_raw = payload_byte_2_raw
+            feedback_decoded = feedback_raw * 4
+            target_decoded = target_raw * 4
+            decode_status = "OK"
+        else:
+            payload_byte_1_raw = 0
+            payload_byte_2_raw = 0
+            feedback_raw = 0
+            target_raw = 0
+            feedback_decoded = None
+            target_decoded = None
+            decode_status = "ERROR"
+
         # Store for later analysis
         self.stats["format_established"] = True
         self.session.log_decoded(
             request_id, self.motor, response,
             framing["starts_with_91"] and framing["ends_with_93"],
-            0, 0, None, None, "UNKNOWN"
+            feedback_raw, target_raw,
+            feedback_decoded, target_decoded,
+            decode_status,
+            payload_byte_1_raw, payload_byte_2_raw
         )
 
         # Check for unexpected bytes
@@ -675,6 +720,31 @@ class ReadbackDiagnostic:
                 print(f"Response: {response_hex}")
 
                 # Log active test
+                # Extract payload bytes from response using same logic as _analyze_response()
+                response = self.last_response
+                if (
+                    len(response) == 5
+                    and response[0] == 0x5B
+                    and response[4] == 0x5D
+                    and response[1] in (0x41, 0x42, 0x43)
+                    and response[1] == ord(self.motor)
+                ):
+                    payload_byte_1_raw = response[2]
+                    payload_byte_2_raw = response[3]
+                    feedback_raw = payload_byte_1_raw
+                    target_raw = payload_byte_2_raw
+                    feedback_decoded = feedback_raw * 4
+                    target_decoded = target_raw * 4
+                    decode_status = "OK"
+                else:
+                    payload_byte_1_raw = 0
+                    payload_byte_2_raw = 0
+                    feedback_raw = 0
+                    target_raw = 0
+                    feedback_decoded = None
+                    target_decoded = None
+                    decode_status = "ERROR"
+
                 self.session.log_active_test(
                     step=step,
                     motor=self.motor,
@@ -682,11 +752,14 @@ class ReadbackDiagnostic:
                     transmitted_hex=transmitted_hex,
                     write_result=written,
                     readback_sample=1,
-                    feedback_raw=0,
-                    target_raw=0,
-                    feedback_decoded=None,
-                    target_decoded=None,
-                    timestamp=dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
+                    feedback_raw=feedback_raw,
+                    target_raw=target_raw,
+                    feedback_decoded=feedback_decoded,
+                    target_decoded=target_decoded,
+                    timestamp=dt.datetime.now().astimezone().isoformat(timespec="milliseconds"),
+                    decode_status=decode_status,
+                    payload_byte_1_raw=payload_byte_1_raw,
+                    payload_byte_2_raw=payload_byte_2_raw
                 )
             else:
                 print("No response received")
