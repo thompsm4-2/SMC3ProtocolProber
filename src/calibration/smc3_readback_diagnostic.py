@@ -210,16 +210,20 @@ class DiagnosticSession:
 
     def _cleanup(self):
         """Ensure serial port is closed."""
-        if self.serial and not self.serial._closed:
-            try:
-                self.serial.close()
-            except Exception:
-                pass
+        if self.serial:
+            serial_closed = getattr(self.serial, 'closed', getattr(self.serial, '_closed', True))
+            if not serial_closed:
+                try:
+                    self.serial.close()
+                except Exception:
+                    pass
         # Also check diagnostic's serial if it exists
         if hasattr(self, '_diagnostic') and self._diagnostic and self._diagnostic.serial:
-            if not self._diagnostic.serial._closed:
+            diag_serial = self._diagnostic.serial
+            diag_closed = getattr(diag_serial, 'closed', getattr(diag_serial, '_closed', True))
+            if not diag_closed:
                 try:
-                    self._diagnostic.serial.close()
+                    diag_serial.close()
                 except Exception:
                     pass
 
