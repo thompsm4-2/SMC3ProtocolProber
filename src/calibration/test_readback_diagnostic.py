@@ -378,56 +378,57 @@ def test_output_directory_non_overwrite():
     print("TEST: Output Directory Non-Overwrite")
     print("=" * 60)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir) / "test_output"
+    import datetime as dt
 
-        # Create first session
-        session1 = DiagnosticSession(output_dir)
-        session1.log_request(
-            request_id=1,
-            motor="A",
-            request_bytes=b"[rda]",
-            written=5,
-            write_duration_ms=0.1,
-            response_start_ms=0.0,
-            response_complete_ms=0.05,
-            latency_ms=5.0,
-            response_length=10,
-            status="OK"
-        )
+    # Freeze datetime to a fixed value so both sessions get the same timestamp,
+    # regardless of how much real time passes between their creation.
+    fixed_now = dt.datetime(2026, 1, 1, 12, 0, 0)
+    with mock.patch('smc3_readback_diagnostic.dt') as mock_dt:
+        mock_dt.datetime.now.return_value = fixed_now
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "test_output"
 
-        # Get the timestamp from session1 to use for session2
-        timestamp = session1.timestamp
+            # Create first session
+            session1 = DiagnosticSession(output_dir)
+            session1.log_request(
+                request_id=1,
+                motor="A",
+                request_bytes=b"[rda]",
+                written=5,
+                write_duration_ms=0.1,
+                response_start_ms=0.0,
+                response_complete_ms=0.05,
+                latency_ms=5.0,
+                response_length=10,
+                status="OK"
+            )
 
-        # Create second session with same directory and timestamp
-        session2 = DiagnosticSession(output_dir)
-        # Manually set the timestamp to match session1
-        session2.timestamp = timestamp
-        # Don't call _setup_output_files() again - files are already created
-        session2.log_request(
-            request_id=2,
-            motor="A",
-            request_bytes=b"[rda]",
-            written=5,
-            write_duration_ms=0.1,
-            response_start_ms=0.0,
-            response_complete_ms=0.05,
-            latency_ms=5.0,
-            response_length=10,
-            status="OK"
-        )
+            # Create second session — same frozen timestamp ensures same file paths
+            session2 = DiagnosticSession(output_dir)
+            session2.log_request(
+                request_id=2,
+                motor="A",
+                request_bytes=b"[rda]",
+                written=5,
+                write_duration_ms=0.1,
+                response_start_ms=0.0,
+                response_complete_ms=0.05,
+                latency_ms=5.0,
+                response_length=10,
+                status="OK"
+            )
 
-        # Verify both requests are in the file (appended, not overwritten)
-        with open(session2.requests_file, "r") as f:
-            lines = f.readlines()
-            assert len(lines) >= 3, "Both requests should be logged"
+            # Verify both requests are in the file (appended, not overwritten)
+            with open(session2.requests_file, "r") as f:
+                lines = f.readlines()
+                assert len(lines) >= 3, "Both requests should be logged"
 
-        session1._cleanup()
-        session2._cleanup()
+            session1._cleanup()
+            session2._cleanup()
 
-        print("  ✓ Multiple sessions append to files")
-        print("  ✓ No data loss between sessions")
-        print("TEST PASSED\n")
+            print("  ✓ Multiple sessions append to files")
+            print("  ✓ No data loss between sessions")
+            print("TEST PASSED\n")
 
 
 def test_raw_serial_log_preservation():
@@ -2170,6 +2171,62 @@ def test_csv_headers_include_new_columns():
             print("TEST PASSED\n")
 
 
+def test_cleanup_with_public_closed_attribute():
+    """Task 3.1: Verify _cleanup() works with a mock serial using public 'closed' attribute (real pySerial behavior)."""
+    print("\n" + "=" * 60)
+    print("TEST: Cleanup with Public closed Attribute")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        # Create a mock serial that uses public 'closed' attribute like real pySerial
+        class MockRealSerial:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        ser = MockRealSerial()
+        session = DiagnosticSession(output_dir)
+        session.serial = ser
+
+        # Cleanup should use getattr to find 'closed' attribute
+        session._cleanup()
+
+        assert ser.closed, "Serial should be closed after cleanup"
+        print("  ✓ _cleanup() correctly uses public 'closed' attribute")
+        print("TEST PASSED\n")
+
+        # Test with already-closed serial
+        session2 = DiagnosticSession(output_dir)
+        session2.serial = MockRealSerial()
+        session2.serial.close()  # Pre-close it
+        session2._cleanup()  # Should not raise
+        print("  ✓ _cleanup() handles already-closed serial without error")
+        print("TEST PASSED\n")
+
+
+def test_cleanup_with_none_serial():
+    """Task 3.2: Verify _cleanup() returns safely when session.serial is None."""
+    print("\n" + "=" * 60)
+    print("TEST: Cleanup with None Serial")
+    print("=" * 60)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "test_output"
+
+        session = DiagnosticSession(output_dir)
+        session.serial = None
+
+        # Cleanup should not crash when serial is None
+        session._cleanup()
+
+        print("  ✓ _cleanup() handles None serial without error")
+        print("TEST PASSED\n")
+
+
 def run_all_tests():
     """Run all tests."""
     print("\n" + "=" * 70)
@@ -2219,6 +2276,8 @@ def run_all_tests():
         test_simulate_non_divisible_round_robin,
         test_poll_motor_short_write_clears_last_response,
         test_poll_motor_exception_clears_last_response,
+        test_cleanup_with_public_closed_attribute,
+        test_cleanup_with_none_serial,
     ]
 
     passed = 0
