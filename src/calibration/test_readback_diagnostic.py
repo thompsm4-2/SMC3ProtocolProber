@@ -873,23 +873,27 @@ def test_normal_passive_cli_execution():
             f"Flushes ({len(fake_serial.flushes)}) should equal writes ({len(fake_serial.writes)})"
         print("  ✓ Flush called after each write")
 
-        # Verify output files were created
+        # Verify output files were created (inside timestamped subdirectory)
         assert output_dir.exists(), "Output directory was not created"
-        print(f"  DEBUG: output_dir = {output_dir}")
-        print(f"  DEBUG: output_dir.exists() = {output_dir.exists()}")
-        requests_files = list(output_dir.glob("requests_*.csv"))
+        subdirs = list(output_dir.iterdir())
+        assert len(subdirs) == 1, f"Expected 1 subdirectory, found {len(subdirs)}: {[s.name for s in subdirs]}"
+        run_subdir = subdirs[0]
+        assert run_subdir.is_dir(), "Run directory is not a directory"
+        print(f"  DEBUG: run_subdir = {run_subdir}")
+
+        requests_files = list(run_subdir.glob("requests_*.csv"))
         print(f"  DEBUG: requests_files = {requests_files}")
         assert len(requests_files) > 0, "Requests CSV was not created"
         # Use glob() to check for file existence
-        assert any(output_dir.glob("requests_*.csv")), "Requests CSV was not created"
-        assert any(output_dir.glob("raw_serial_*.log")), "Raw serial log was not created"
-        assert any(output_dir.glob("decoded_readbacks_*.csv")), "Decoded CSV was not created"
-        assert any(output_dir.glob("summary_*.txt")), "Summary file was not created"
+        assert any(run_subdir.glob("requests_*.csv")), "Requests CSV was not created"
+        assert any(run_subdir.glob("raw_serial_*.log")), "Raw serial log was not created"
+        assert any(run_subdir.glob("decoded_readbacks_*.csv")), "Decoded CSV was not created"
+        assert any(run_subdir.glob("summary_*.txt")), "Summary file was not created"
         print("  ✓ All output files created")
 
         # Verify requests CSV has correct headers
         requests_file = None
-        for f in output_dir.glob("requests_*.csv"):
+        for f in run_subdir.glob("requests_*.csv"):
             requests_file = f
             break
         assert requests_file is not None, "No requests CSV file found"
@@ -908,7 +912,7 @@ def test_normal_passive_cli_execution():
 
         # Verify raw log contains TX and RX entries
         raw_log_file = None
-        for f in output_dir.glob("raw_serial_*.log"):
+        for f in run_subdir.glob("raw_serial_*.log"):
             raw_log_file = f
             break
         assert raw_log_file is not None, "No raw serial log found"
@@ -925,7 +929,7 @@ def test_normal_passive_cli_execution():
 
         # Verify summary file was created with expected content
         summary_file = None
-        for f in output_dir.glob("summary_*.txt"):
+        for f in run_subdir.glob("summary_*.txt"):
             summary_file = f
             break
         assert summary_file is not None, "No summary file found"
@@ -1066,11 +1070,13 @@ def test_exception_cleanup_with_injected_failure():
         # The test verifies that errors are handled gracefully and logged correctly.
         print("  ✓ Error handled gracefully (serial remains open until main() exits)")
 
-        # Verify output files were still created (cleanup ran)
+        # Verify output files were still created (cleanup ran, inside timestamped subdirectory)
         assert output_dir.exists(), "Output directory was not created"
-        print(f"  DEBUG: output_dir = {output_dir}")
-        print(f"  DEBUG: output_dir.exists() = {output_dir.exists()}")
-        summary_files = list(output_dir.glob("summary_*.txt"))
+        subdirs = list(output_dir.iterdir())
+        assert len(subdirs) == 1, f"Expected 1 subdirectory, found {len(subdirs)}: {[s.name for s in subdirs]}"
+        run_subdir = subdirs[0]
+        print(f"  DEBUG: run_subdir = {run_subdir}")
+        summary_files = list(run_subdir.glob("summary_*.txt"))
         print(f"  DEBUG: summary_files = {summary_files}")
         assert len(summary_files) > 0, "Summary file was not created"
         summary_file = summary_files[0]

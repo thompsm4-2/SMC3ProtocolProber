@@ -161,17 +161,21 @@ class DiagnosticSession:
         self._setup_output_files()
 
     def _setup_output_files(self):
-        """Create timestamped output files."""
-        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.timestamp = timestamp
-        # Create output directory
+        """Create timestamped output files in a run-specific subdirectory."""
+        # Generate run-start timestamps (two formats from one source time)
+        run_now = dt.datetime.now()
+        self.timestamp = run_now.strftime("%Y%m%d_%H%M%S")  # file-level timestamp
+        run_dir_name = run_now.strftime("%Y-%m-%d_%H-%M-%S")  # subdirectory name
+        # Create timestamped subdirectory inside the parent output directory
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = self.output_dir / run_dir_name
         self.output_dir.mkdir(parents=True, exist_ok=True)
         # Initialize output files
-        self.requests_file = self.output_dir / f"requests_{timestamp}.csv"
-        self.raw_log_file = self.output_dir / f"raw_serial_{timestamp}.log"
-        self.decoded_file = self.output_dir / f"decoded_readbacks_{timestamp}.csv"
-        self.active_file = self.output_dir / f"active_test_{timestamp}.csv"
-        self.summary_file = self.output_dir / f"summary_{timestamp}.txt"
+        self.requests_file = self.output_dir / f"requests_{self.timestamp}.csv"
+        self.raw_log_file = self.output_dir / f"raw_serial_{self.timestamp}.log"
+        self.decoded_file = self.output_dir / f"decoded_readbacks_{self.timestamp}.csv"
+        self.active_file = self.output_dir / f"active_test_{self.timestamp}.csv"
+        self.summary_file = self.output_dir / f"summary_{self.timestamp}.txt"
         # Write headers (append if file exists)
         with open(self.requests_file, "a", newline="") as f:
             writer = csv.writer(f)
@@ -182,7 +186,7 @@ class DiagnosticSession:
             ])
         with open(self.raw_log_file, "a") as f:
             f.write("# SMC3 Readback Diagnostic - Raw Serial Log\n")
-            f.write(f"# Timestamp: {timestamp}\n")
+            f.write(f"# Timestamp: {self.timestamp}\n")
             f.write("# Format: monotonic_ms,wall_ts,direction,request_id,hex_bytes\n")
         with open(self.decoded_file, "a", newline="") as f:
             writer = csv.writer(f)
@@ -1191,7 +1195,7 @@ Examples:
         print(f"Inter-request Delay: {args.delay}s")
     print(f"Read Timeout: {args.read_timeout}s")
     print(f"Write Timeout: {args.write_timeout}s")
-    print(f"Output Directory: {output_dir}")
+    print(f"Output Directory: {output_dir} (files written to timestamped subdirectory)")
 
     if port_info:
         print(f"\nDetected Device Info:")
@@ -1277,9 +1281,9 @@ Examples:
             print(f"Timeouts: {stats['timeouts']}")
             print(f"Malformed: {stats['malformed']}")
             print(f"Errors: {stats['errors']}")
-            print(f"Output Directory: {output_dir}")
+            print(f"Output Directory: {session.output_dir}")
             print("\nGenerated files:")
-            for f in output_dir.iterdir():
+            for f in session.output_dir.iterdir():
                 print(f"  {f.name}")
 
             return 0
