@@ -29,6 +29,7 @@ from smc3_readback_diagnostic import (
     MAX_POS,
     CENTER,
 )
+from h3_characterize import smc3_frame
 
 
 def test_read_commands():
@@ -2328,6 +2329,119 @@ def test_all_motor_cli_execution():
     print("TEST PASSED\n")
 
 
+def test_active_test_transmits_position_commands_motor_a():
+    """Test that run_active() transmits exact SMC3 position-command bytes for motor A."""
+    print("\n" + "=" * 60)
+    print("TEST: Active Test Transmits Position Commands (Motor A)")
+    print("=" * 60)
+
+    targets = ACTIVE_TEST_SEQUENCE  # [512, 513, 514, 515, 516, 520, 524]
+    # Each target: 1 position command write + 1 readback query write = 2 writes per target
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (len(targets) * 2)
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=targets, settling_delay=0.01)
+
+    # Position commands are at even indices (0, 2, 4, ...) in write history
+    for i, target in enumerate(targets):
+        expected = smc3_frame("A", target)
+        actual = ser._write_history[i * 2]  # even indices = position commands
+        assert actual == expected, (
+            f"Step {i+1}: expected {expected!r} for target {target}, "
+            f"got {actual!r}"
+        )
+
+    print(f"  ✓ All {len(targets)} position commands match smc3_frame('A', target)")
+    print("TEST PASSED\n")
+
+
+def test_active_test_transmits_position_commands_motors_b_c():
+    """Test that run_active() transmits exact SMC3 position-command bytes for motors B and C."""
+    print("\n" + "=" * 60)
+    print("TEST: Active Test Transmits Position Commands (Motors B, C)")
+    print("=" * 60)
+
+    target = 512
+    for motor in ["B", "C"]:
+        ser = FakeSerial(
+            port="/dev/ttyACM0",
+            responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"] * 2
+        )
+        diag = ReadbackDiagnostic(
+            session=mock.MagicMock(),
+            serial=ser,
+            motor=motor,
+            verbose=False
+        )
+
+        diag.run_active(motor=motor, targets=[target], settling_delay=0.01)
+
+        expected = smc3_frame(motor, target)
+        actual = ser._write_history[0]  # first write = position command
+        assert actual == expected, (
+            f"Motor {motor}: expected {expected!r}, got {actual!r}"
+        )
+
+        # Verify the motor byte in the frame
+        assert actual[1] == ord(motor), (
+            f"Motor {motor}: expected motor byte 0x{ord(motor):02X}, "
+            f"got 0x{actual[1]:02X}"
+        )
+        print(f"  ✓ Motor {motor}: transmitted {actual.hex(' ')} (motor byte 0x{actual[1]:02X})")
+
+    print("TEST PASSED\n")
+
+
+def test_active_test_position_clamping():
+    """Test that run_active() clamps positions via smc3_frame() to [0, 1023]."""
+    print("\n" + "=" * 60)
+    print("TEST: Active Test Position Clamping")
+    print("=" * 60)
+
+    # Test negative position clamps to 0
+    ser = FakeSerial(port="/dev/ttyACM0", responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"])
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+    diag.run_active(motor="A", targets=[-10], settling_delay=0.01)
+    expected = smc3_frame("A", -10)  # should clamp to 0
+    actual = ser._write_history[0]
+    assert actual == expected, (
+        f"Negative target: expected {expected!r}, got {actual!r}"
+    )
+    assert actual == bytes([91, 65, 0, 0, 93]), "Position -10 should clamp to 0"
+    print("  ✓ Position -10 clamped to 0")
+
+    # Test position above MAX clamps to 1023
+    ser = FakeSerial(port="/dev/ttyACM0", responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"])
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+    diag.run_active(motor="A", targets=[2000], settling_delay=0.01)
+    expected = smc3_frame("A", 2000)  # should clamp to 1023
+    actual = ser._write_history[0]
+    assert actual == expected, (
+        f"Position > MAX: expected {expected!r}, got {actual!r}"
+    )
+    assert actual == bytes([91, 65, 3, 255, 93]), "Position 2000 should clamp to 1023"
+    print("  ✓ Position 2000 clamped to 1023")
+
+    print("TEST PASSED\n")
+
+
 def run_all_tests():
     """Run all tests."""
     print("\n" + "=" * 70)
@@ -2380,6 +2494,9 @@ def run_all_tests():
         test_cleanup_with_public_closed_attribute,
         test_cleanup_with_none_serial,
         test_all_motor_cli_execution,
+        test_active_test_transmits_position_commands_motor_a,
+        test_active_test_transmits_position_commands_motors_b_c,
+        test_active_test_position_clamping,
     ]
 
     passed = 0
