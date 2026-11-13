@@ -40,6 +40,9 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+# Import smc3_frame for position command encoding in active test
+from h3_characterize import smc3_frame
+
 
 # SMC3 read command bytes - uppercase as specified
 READ_COMMANDS: Dict[str, bytes] = {
@@ -86,6 +89,7 @@ class FakeSerial:
         self._response_offset = 0  # Track offset within current response
         self._closed = False
         self._response_list = []  # List to store responses for reading
+        self._write_history: List[bytes] = []  # Track all written data for testing
 
     def write(self, data: bytes) -> int:
         """Write data to the serial port."""
@@ -94,6 +98,7 @@ class FakeSerial:
         if self.write_error:
             raise IOError("Fake write error")
         self._write_count += 1
+        self._write_history.append(data)
         # Generate response if configured - append the next response
         if self.responses:
             # Use a counter to track which response to return
@@ -699,13 +704,13 @@ class ReadbackDiagnostic:
                 break
 
             step += 1
-            transmitted = READ_COMMANDS[self.motor]
+            transmitted = smc3_frame(self.motor, target)
             transmitted_hex = " ".join(f"{b:02X}" for b in transmitted)
 
             print(f"\nStep {step}: Sending motor {motor} target = {target}")
             print(f"Transmitting: {transmitted_hex}")
 
-            # Send position command
+            # Transmit SMC3 position command for the target
             try:
                 written = self.serial.write(transmitted)
                 if written != len(transmitted):
