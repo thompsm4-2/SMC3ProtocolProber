@@ -1232,16 +1232,47 @@ Examples:
             session.serial = ser
 
             # Create diagnostic engine
-            diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
-
-            # Run test
             if args.active_target_test:
                 # Active test mode
                 print("\nStarting active target-resolution test...")
+                diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
                 diagnostic.run_active(args.active_motor, active_targets, args.active_settle)
+            elif args.motor == "ALL":
+                # Passive test mode: round-robin motor polling (A, B, C)
+                motor_cycle = ["A", "B", "C"]
+                print("\nStarting passive readback polling (ALL motors, round-robin)...")
+                interval = 1.0 / args.polling_rate if args.polling_rate > 0 else DEFAULT_POLL_INTERVAL
+                start = time.monotonic()
+                last_poll = start
+                motor_index = 0
+                # Use a shared stats dict across motor instances
+                diagnostic = ReadbackDiagnostic(session, ser, "A", verbose=args.verbose)
+                while True:
+                    now = time.monotonic()
+                    if now - last_poll >= interval:
+                        motor = motor_cycle[motor_index % 3]
+                        # Create fresh diagnostic for each motor to avoid
+                        # READ_COMMANDS["ALL"] KeyError
+                        diag_motor = ReadbackDiagnostic(
+                            session, ser, motor, verbose=args.verbose
+                        )
+                        # Merge stats from previous iteration
+                        diag_motor.stats.update(diagnostic.stats)
+                        diag_motor.request_counter = diagnostic.request_counter
+                        diag_motor.running = True
+                        diag_motor.poll_motor(DEFAULT_TIMEOUT, interval, args.delay)
+                        diagnostic = diag_motor
+                        motor_index += 1
+                        last_poll = now
+                    elapsed = now - start
+                    if args.duration > 0 and elapsed >= args.duration:
+                        break
+                    time.sleep(0.01)
+                diagnostic.running = False
             else:
-                # Passive test mode
+                # Passive test mode (single motor)
                 print("\nStarting passive readback polling...")
+                diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
                 diagnostic.run_passive(args.duration, args.polling_rate, args.delay)
 
             # Write summary

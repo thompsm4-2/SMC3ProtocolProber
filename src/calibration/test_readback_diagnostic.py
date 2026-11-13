@@ -2233,6 +2233,101 @@ def test_cleanup_with_none_serial():
         print("TEST PASSED\n")
 
 
+def test_all_motor_cli_execution():
+    """Integration test: verify --motor ALL expands to round-robin polling in real-hardware mode.
+
+    This is a regression test for the KeyError: 'ALL' bug where --motor ALL
+    in real-hardware mode passed the literal string "ALL" to ReadbackDiagnostic,
+    which then tried READ_COMMANDS["ALL"] and crashed.
+
+    The fix creates per-motor ReadbackDiagnostic instances (A, B, C) and polls
+    them in round-robin fashion, identical to the simulation-mode behavior.
+    """
+    print("\n" + "=" * 60)
+    print("TEST: All Motor CLI Execution (--motor ALL)")
+    print("=" * 60)
+
+    # Track which read commands were sent
+    sent_commands = []
+
+    class TrackingFakeSerial(FakeSerial):
+        def write(self, data):
+            sent_commands.append(data)
+            return super().write(data)
+
+    # Create FakeSerial with responses for all three motors
+    fake_serial = TrackingFakeSerial(
+        port="/dev/ttyUSB4",
+        baudrate=500000,
+        timeout=0.10,
+        responses=[
+            b"[rdA]OK5D",
+            b"[rdB]OK5D",
+            b"[rdC]OK5D",
+            b"[rdA]OK5D",
+            b"[rdB]OK5D",
+            b"[rdC]OK5D",
+        ]
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir) / "all_motor_test"
+
+        # Call main() with motor=ALL (real-hardware path via injected factory)
+        result = main(
+            argv=[
+                "--port", "/dev/ttyUSB4",
+                "--motor", "ALL",
+                "--duration", "1",
+                "--polling-rate", "3",
+                "--output-dir", str(output_dir),
+            ],
+            serial_factory=lambda port, baudrate, timeout, write_timeout, **kwargs: fake_serial
+        )
+
+        # Verify return code — the old code would crash with KeyError: 'ALL'
+        assert result == 0, f"Expected 0, got {result}"
+        print("  ✓ main() returned 0 (no KeyError: 'ALL')")
+
+        # Verify commands were sent for all three motors
+        assert len(sent_commands) > 0, "No commands were sent"
+        motors_seen = set()
+        for cmd in sent_commands:
+            assert cmd in READ_COMMANDS.values(), f"Unexpected command: {cmd}"
+            if cmd == READ_COMMANDS["A"]:
+                motors_seen.add("A")
+            elif cmd == READ_COMMANDS["B"]:
+                motors_seen.add("B")
+            elif cmd == READ_COMMANDS["C"]:
+                motors_seen.add("C")
+
+        assert motors_seen == {"A", "B", "C"}, \
+            f"Expected all motors, got {motors_seen}"
+        print(f"  ✓ All three motors polled (A, B, C)")
+
+        # Verify round-robin order (first three should be A, B, C)
+        if len(sent_commands) >= 3:
+            assert sent_commands[0] == READ_COMMANDS["A"], \
+                f"Expected [rdA] first, got {sent_commands[0]}"
+            assert sent_commands[1] == READ_COMMANDS["B"], \
+                f"Expected [rdB] second, got {sent_commands[1]}"
+            assert sent_commands[2] == READ_COMMANDS["C"], \
+                f"Expected [rdC] third, got {sent_commands[2]}"
+        print("  ✓ Round-robin order verified (A, B, C)")
+
+        # Verify output files were created
+        assert output_dir.exists(), "Output directory was not created"
+        subdirs = list(output_dir.iterdir())
+        assert len(subdirs) == 1, f"Expected 1 subdirectory, found {len(subdirs)}"
+        run_subdir = subdirs[0]
+        assert any(run_subdir.glob("requests_*.csv")), "Requests CSV not created"
+        assert any(run_subdir.glob("summary_*.txt")), "Summary file not created"
+        print("  ✓ Output files created")
+
+    print("  ✓ All-motor execution verified")
+    print("TEST PASSED\n")
+
+
 def run_all_tests():
     """Run all tests."""
     print("\n" + "=" * 70)
@@ -2284,6 +2379,7 @@ def run_all_tests():
         test_poll_motor_exception_clears_last_response,
         test_cleanup_with_public_closed_attribute,
         test_cleanup_with_none_serial,
+        test_all_motor_cli_execution,
     ]
 
     passed = 0
