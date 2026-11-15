@@ -23,6 +23,7 @@ from smc3_readback_diagnostic import (
     READ_COMMANDS,
     ACTIVE_TEST_SEQUENCE,
     parse_motor_arg,
+    parse_args,
     detect_serial_info,
     main,
     MIN_POS,
@@ -116,23 +117,23 @@ def test_fake_serial_responses():
     ]
 
     with FakeSerial(port="/dev/ttyACM0", responses=responses) as ser:
-        # Write first command, should get first response
-        written = ser.write(b"test1")
+        # Write first read command, should get first response
+        written = ser.write(b"[rdA]")
         data = ser.read(20)  # Read more to get full response
         assert data == b"[rdA]OK5D", f"Expected [rdA]OK5D, got {data!r}"
 
-        # Write second command, should get second response
-        written = ser.write(b"test2")
+        # Write second read command, should get second response
+        written = ser.write(b"[rdb]")
         data = ser.read(20)
         assert data == b"[rdb]OK5D", f"Expected [rdb]OK5D, got {data!r}"
 
-        # Write third command, should get third response
-        written = ser.write(b"test3")
+        # Write third read command, should get third response
+        written = ser.write(b"[rdc]")
         data = ser.read(20)
         assert data == b"[rdc]OK5D", f"Expected [rdc]OK5D, got {data!r}"
 
         # Fourth write should get no response
-        written = ser.write(b"test4")
+        written = ser.write(b"[rdA]")
         data = ser.read(20)
         assert data == b"", f"Expected empty, got {data!r}"
 
@@ -2336,8 +2337,9 @@ def test_active_test_transmits_position_commands_motor_a():
     print("=" * 60)
 
     targets = ACTIVE_TEST_SEQUENCE  # [512, 513, 514, 515, 516, 520, 524]
-    # Each target: 1 position command write + 1 readback query write = 2 writes per target
-    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (len(targets) * 2)
+    sample_count = 5
+    # Each target: 1 position command write + sample_count readback query writes
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (len(targets) * (1 + sample_count))
 
     ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
     diag = ReadbackDiagnostic(
@@ -2347,12 +2349,14 @@ def test_active_test_transmits_position_commands_motor_a():
         verbose=False
     )
 
-    diag.run_active(motor="A", targets=targets, settling_delay=0.01)
+    diag.run_active(motor="A", targets=targets, settling_delay=0.01, sample_count=sample_count)
 
-    # Position commands are at even indices (0, 2, 4, ...) in write history
+    # Position commands are at even indices (0, 6, 12, ...) in write history
+    # Each target has 1 position cmd + sample_count readback queries
+    writes_per_target = 1 + sample_count
     for i, target in enumerate(targets):
         expected = smc3_frame("A", target)
-        actual = ser._write_history[i * 2]  # even indices = position commands
+        actual = ser._write_history[i * writes_per_target]  # first write per target = position command
         assert actual == expected, (
             f"Step {i+1}: expected {expected!r} for target {target}, "
             f"got {actual!r}"
@@ -2368,11 +2372,13 @@ def test_active_test_transmits_position_commands_motors_b_c():
     print("TEST: Active Test Transmits Position Commands (Motors B, C)")
     print("=" * 60)
 
+    sample_count = 5
     target = 512
     for motor in ["B", "C"]:
+        responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + sample_count)
         ser = FakeSerial(
             port="/dev/ttyACM0",
-            responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"] * 2
+            responses=responses
         )
         diag = ReadbackDiagnostic(
             session=mock.MagicMock(),
@@ -2381,7 +2387,7 @@ def test_active_test_transmits_position_commands_motors_b_c():
             verbose=False
         )
 
-        diag.run_active(motor=motor, targets=[target], settling_delay=0.01)
+        diag.run_active(motor=motor, targets=[target], settling_delay=0.01, sample_count=sample_count)
 
         expected = smc3_frame(motor, target)
         actual = ser._write_history[0]  # first write = position command
@@ -2405,15 +2411,21 @@ def test_active_test_position_clamping():
     print("TEST: Active Test Position Clamping")
     print("=" * 60)
 
+    sample_count = 5
     # Test negative position clamps to 0
-    ser = FakeSerial(port="/dev/ttyACM0", responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"])
+    ser = FakeSerial(
+        port="/dev/ttyACM0",
+        responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + sample_count)
+    )
     diag = ReadbackDiagnostic(
         session=mock.MagicMock(),
         serial=ser,
         motor="A",
         verbose=False
     )
-    diag.run_active(motor="A", targets=[-10], settling_delay=0.01)
+    diag.run_active(
+        motor="A", targets=[-10], settling_delay=0.01, sample_count=sample_count
+    )
     expected = smc3_frame("A", -10)  # should clamp to 0
     actual = ser._write_history[0]
     assert actual == expected, (
@@ -2423,14 +2435,19 @@ def test_active_test_position_clamping():
     print("  ✓ Position -10 clamped to 0")
 
     # Test position above MAX clamps to 1023
-    ser = FakeSerial(port="/dev/ttyACM0", responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"])
+    ser = FakeSerial(
+        port="/dev/ttyACM0",
+        responses=[b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + sample_count)
+    )
     diag = ReadbackDiagnostic(
         session=mock.MagicMock(),
         serial=ser,
         motor="A",
         verbose=False
     )
-    diag.run_active(motor="A", targets=[2000], settling_delay=0.01)
+    diag.run_active(
+        motor="A", targets=[2000], settling_delay=0.01, sample_count=sample_count
+    )
     expected = smc3_frame("A", 2000)  # should clamp to 1023
     actual = ser._write_history[0]
     assert actual == expected, (
@@ -2439,6 +2456,544 @@ def test_active_test_position_clamping():
     assert actual == bytes([91, 65, 3, 255, 93]), "Position 2000 should clamp to 1023"
     print("  ✓ Position 2000 clamped to 1023")
 
+    print("TEST PASSED\n")
+
+
+def test_default_sample_count_is_5():
+    """Test that run_active() collects 5 samples per step with default sample_count."""
+    print("\n" + "=" * 60)
+    print("TEST: Default Sample Count (5)")
+    print("=" * 60)
+
+    targets = ACTIVE_TEST_SEQUENCE
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (len(targets) * (1 + 5))
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    # Call run_active() WITHOUT sample_count to verify default is 5
+    diag.run_active(motor="A", targets=targets, settling_delay=0.01)
+
+    # Verify 5 samples per step by checking write history
+    writes_per_target = 1 + 5
+    assert len(ser._write_history) == len(targets) * writes_per_target, (
+        f"Expected {len(targets) * writes_per_target} writes, got {len(ser._write_history)}"
+    )
+
+    # Verify the session.log_active_test was called with correct sample counts
+    log_calls = diag.session.log_active_test.call_count
+    expected_calls = len(targets) * 5
+    assert log_calls == expected_calls, (
+        f"Expected {expected_calls} log calls, got {log_calls}"
+    )
+
+    print(f"  ✓ 5 samples collected per step (default)")
+    print(f"  ✓ {log_calls} total log_active_test calls for {len(targets)} targets")
+    print("TEST PASSED\n")
+
+
+def test_configurable_sample_count():
+    """Test that --active-samples 3 collects exactly 3 samples per step."""
+    print("\n" + "=" * 60)
+    print("TEST: Configurable Sample Count (3)")
+    print("=" * 60)
+
+    targets = ACTIVE_TEST_SEQUENCE
+    sample_count = 3
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (len(targets) * (1 + sample_count))
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=targets, settling_delay=0.01, sample_count=sample_count)
+
+    log_calls = diag.session.log_active_test.call_count
+    expected_calls = len(targets) * sample_count
+    assert log_calls == expected_calls, (
+        f"Expected {expected_calls} log calls, got {log_calls}"
+    )
+
+    writes_per_target = 1 + sample_count
+    assert len(ser._write_history) == len(targets) * writes_per_target, (
+        f"Expected {len(targets) * writes_per_target} writes, got {len(ser._write_history)}"
+    )
+
+    print(f"  ✓ {sample_count} samples collected per step (configurable)")
+    print(f"  ✓ {log_calls} total log_active_test calls for {len(targets)} targets")
+    print("TEST PASSED\n")
+
+
+def test_sample_index_values():
+    """Test that sample_index values are 0 through N-1."""
+    print("\n" + "=" * 60)
+    print("TEST: Sample Index Values")
+    print("=" * 60)
+
+    sample_count = 3
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + sample_count)
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=sample_count)
+
+    # Check sample_index values from log_active_test calls
+    call_args_list = diag.session.log_active_test.call_args_list
+    sample_indices = [call[1]["sample_index"] for call in call_args_list]
+    expected_indices = list(range(sample_count))
+
+    assert sample_indices == expected_indices, (
+        f"Expected sample_index {expected_indices}, got {sample_indices}"
+    )
+
+    print(f"  ✓ sample_index values: {sample_indices}")
+    print("TEST PASSED\n")
+
+
+def test_sample_timestamp_format():
+    """Test that sample_timestamp records ISO 8601 format timestamps."""
+    print("\n" + "=" * 60)
+    print("TEST: Sample Timestamp Format")
+    print("=" * 60)
+
+    import datetime
+
+    sample_count = 3
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + sample_count)
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=sample_count)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    timestamps = [call[1]["sample_timestamp"] for call in call_args_list]
+
+    for ts in timestamps:
+        assert ts != "", "sample_timestamp should not be empty"
+        # Verify it's parseable as ISO 8601
+        try:
+            datetime.datetime.fromisoformat(ts)
+        except ValueError:
+            raise AssertionError(f"sample_timestamp '{ts}' is not valid ISO 8601")
+
+    print(f"  ✓ All {len(timestamps)} sample_timestamps are valid ISO 8601")
+    for ts in timestamps:
+        print(f"    - {ts}")
+    print("TEST PASSED\n")
+
+
+def test_readback_failure_produces_error_sample():
+    """Test that poll_motor returning False produces ERROR sample with null decoded fields."""
+    print("\n" + "=" * 60)
+    print("TEST: Readback Failure Produces ERROR Sample")
+    print("=" * 60)
+
+    sample_count = 3
+    # All responses are empty (poll_motor will return False)
+    ser = FakeSerial(port="/dev/ttyACM0", responses=[])
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=sample_count)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    assert len(call_args_list) == sample_count, (
+        f"Expected {sample_count} log calls, got {len(call_args_list)}"
+    )
+
+    for i, call in enumerate(call_args_list):
+        kwargs = call[1]
+        assert kwargs["decode_status"] == "ERROR", (
+            f"Sample {i}: expected decode_status='ERROR', got '{kwargs['decode_status']}'"
+        )
+        assert kwargs["feedback_decoded"] is None, (
+            f"Sample {i}: expected feedback_decoded=None, got {kwargs['feedback_decoded']}"
+        )
+        assert kwargs["target_decoded"] is None, (
+            f"Sample {i}: expected target_decoded=None, got {kwargs['target_decoded']}"
+        )
+        assert kwargs["sample_index"] == i, (
+            f"Sample {i}: expected sample_index={i}, got {kwargs['sample_index']}"
+        )
+
+    print(f"  ✓ All {sample_count} samples logged with decode_status='ERROR'")
+    print("TEST PASSED\n")
+
+
+def test_readback_failure_continues_sampling_loop():
+    """Test that a failed sample does not break the sampling loop."""
+    print("\n" + "=" * 60)
+    print("TEST: Readback Failure Does Not Break Sampling Loop")
+    print("=" * 60)
+
+    sample_count = 5
+    # Valid 5-byte response format: [M<fb><tg>] where fb=target_raw*4, tg=target_raw*4
+    valid = b"[A\x00\x00]"  # 5 bytes, passes framing check
+    # First 2 valid, 2 failures (empty), 1 valid — total 5 canned responses
+    responses = [valid, valid, b"", b"", valid]
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=sample_count)
+
+    # Verify all 5 samples were logged (loop continued after failures)
+    call_args_list = diag.session.log_active_test.call_args_list
+    assert len(call_args_list) == sample_count, (
+        f"Expected {sample_count} log calls, got {len(call_args_list)}"
+    )
+
+    # Verify sample_index values are complete (0 through 4)
+    sample_indices = [call[1]["sample_index"] for call in call_args_list]
+    assert sample_indices == list(range(sample_count)), (
+        f"Expected {list(range(sample_count))}, got {sample_indices}"
+    )
+
+    # Verify mixed OK and ERROR rows
+    statuses = [call[1]["decode_status"] for call in call_args_list]
+    assert statuses == ["OK", "OK", "ERROR", "ERROR", "OK"], (
+        f"Expected mixed statuses, got {statuses}"
+    )
+
+    # Verify failed samples have null decoded fields and error message
+    for idx in [2, 3]:
+        call = call_args_list[idx]
+        kwargs = call[1]
+        assert kwargs["decode_status"] == "ERROR", (
+            f"Sample {idx}: expected ERROR, got {kwargs['decode_status']}"
+        )
+        assert kwargs["feedback_decoded"] is None, (
+            f"Sample {idx}: feedback_decoded should be None"
+        )
+        assert kwargs["target_decoded"] is None, (
+            f"Sample {idx}: target_decoded should be None"
+        )
+        assert kwargs["error"] == "timeout", (
+            f"Sample {idx}: error should be 'timeout', got {kwargs['error']}"
+        )
+
+    # Verify successful samples have decoded values
+    for idx in [0, 1, 4]:
+        call = call_args_list[idx]
+        kwargs = call[1]
+        assert kwargs["decode_status"] == "OK", (
+            f"Sample {idx}: expected OK, got {kwargs['decode_status']}"
+        )
+        assert kwargs["error"] is None, (
+            f"Sample {idx}: error should be None, got {kwargs['error']}"
+        )
+
+    print(f"  ✓ All {sample_count} samples collected with mixed OK/ERROR rows")
+    print("TEST PASSED\n")
+
+
+def test_multiple_steps_multi_sample():
+    """Test that multiple steps each collect the correct number of samples."""
+    print("\n" + "=" * 60)
+    print("TEST: Multiple Steps Multi-Sample")
+    print("=" * 60)
+
+    sample_count = 4
+    targets = [512, 520, 524]
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (len(targets) * (1 + sample_count))
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=targets, settling_delay=0.01, sample_count=sample_count)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    total_expected = len(targets) * sample_count
+    assert len(call_args_list) == total_expected, (
+        f"Expected {total_expected} log calls, got {len(call_args_list)}"
+    )
+
+    # Verify step values are correct (1-based indexing in run_active)
+    steps = [call[1]["step"] for call in call_args_list]
+    expected_steps = []
+    for step in range(1, len(targets) + 1):
+        for _ in range(sample_count):
+            expected_steps.append(step)
+    assert steps == expected_steps, (
+        f"Expected steps {expected_steps}, got {steps}"
+    )
+
+    print(f"  ✓ {len(targets)} steps × {sample_count} samples = {total_expected} log calls")
+    print("TEST PASSED\n")
+
+
+def test_readback_sample_field():
+    """Test that readback_sample field reflects the total sample count per step."""
+    print("\n" + "=" * 60)
+    print("TEST: Readback Sample Field")
+    print("=" * 60)
+
+    sample_count = 7
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + sample_count)
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=sample_count)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    for call in call_args_list:
+        assert call[1]["readback_sample"] == sample_count, (
+            f"Expected readback_sample={sample_count}, got {call[1]['readback_sample']}"
+        )
+
+    print(f"  ✓ readback_sample = {sample_count} for all samples")
+    print("TEST PASSED\n")
+
+
+def test_malformed_response_produces_error_sample():
+    """Test that a malformed response (wrong framing/motor) produces an ERROR row."""
+    print("\n" + "=" * 60)
+    print("TEST: Malformed Response Produces ERROR Sample")
+    print("=" * 60)
+
+    sample_count = 5
+    # Valid 5-byte response
+    valid = b"[A\x00\x00]"
+    # Malformed: wrong motor byte (0x42 = 'B' instead of 0x41 = 'A')
+    malformed = b"[B\x00\x00]"
+    responses = [valid, valid, valid, malformed, valid]  # malformed at index 3
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=sample_count)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    assert len(call_args_list) == sample_count, (
+        f"Expected {sample_count} log calls, got {len(call_args_list)}"
+    )
+
+    # Verify sample 3 (the malformed one) has ERROR decode_status
+    malformed_call = call_args_list[3]
+    assert malformed_call[1]["decode_status"] == "ERROR", (
+        f"Expected ERROR for malformed response, got {malformed_call[1]['decode_status']}"
+    )
+    assert malformed_call[1]["feedback_decoded"] is None, (
+        "Malformed response should have null feedback_decoded"
+    )
+    assert malformed_call[1]["target_decoded"] is None, (
+        "Malformed response should have null target_decoded"
+    )
+
+    # Verify other samples are OK
+    for i in [0, 1, 2, 4]:
+        assert call_args_list[i][1]["decode_status"] == "OK", (
+            f"Sample {i} should be OK, got {call_args_list[i][1]['decode_status']}"
+        )
+
+    print(f"  ✓ Malformed response logged as ERROR, loop continued")
+    print("TEST PASSED\n")
+
+
+def test_single_sample_mode():
+    """Test that sample_count=1 collects exactly one sample per step."""
+    print("\n" + "=" * 60)
+    print("TEST: Single Sample Mode (sample_count=1)")
+    print("=" * 60)
+
+    # 5-byte valid response: [A<fb><tg>] where fb=0x00, tg=0x00 → decoded=0
+    valid = b"[A\x00\x00]"
+    ser = FakeSerial(
+        port="/dev/ttyACM0",
+        responses=[valid] * 2
+    )
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    diag.run_active(motor="A", targets=[512], settling_delay=0.01, sample_count=1)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    assert len(call_args_list) == 1, (
+        f"Expected 1 log call for sample_count=1, got {len(call_args_list)}"
+    )
+
+    kwargs = call_args_list[0][1]
+    assert kwargs["sample_index"] == 0, (
+        f"Expected sample_index=0, got {kwargs['sample_index']}"
+    )
+    assert kwargs["decode_status"] == "OK", (
+        f"Expected decode_status='OK', got {kwargs['decode_status']}"
+    )
+    assert kwargs["feedback_decoded"] == 0, (
+        f"Expected feedback_decoded=0, got {kwargs['feedback_decoded']}"
+    )
+
+    print("  ✓ sample_count=1 collects exactly one sample per step")
+    print("TEST PASSED\n")
+
+
+def test_default_sample_count_omitted():
+    """Test that run_active() uses sample_count=5 when parameter is omitted."""
+    print("\n" + "=" * 60)
+    print("TEST: Default Sample Count When Omitted")
+    print("=" * 60)
+
+    targets = [512]
+    responses = [b"[rdA]\x00\x00\x00\x00\x00\x00"] * (1 + 5)
+
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    # Call run_active() WITHOUT sample_count to use the default
+    diag.run_active(motor="A", targets=targets, settling_delay=0.01)
+
+    call_args_list = diag.session.log_active_test.call_args_list
+    assert len(call_args_list) == 5, (
+        f"Expected 5 samples (default), got {len(call_args_list)}"
+    )
+
+    print("  ✓ Default sample_count=5 applied when parameter omitted")
+    print("TEST PASSED\n")
+
+
+def test_sampling_timing_evenly_spaced():
+    """Test that sleep calls between samples match the expected interval."""
+    print("\n" + "=" * 60)
+    print("TEST: Sampling Timing Evenly Spaced")
+    print("=" * 60)
+
+    settling_delay = 0.1
+    sample_count = 4
+    expected_interval = settling_delay / sample_count  # 0.025s
+
+    valid = b"[A\x00\x00]"
+    responses = [valid] * (1 + sample_count)
+    ser = FakeSerial(port="/dev/ttyACM0", responses=responses)
+    diag = ReadbackDiagnostic(
+        session=mock.MagicMock(),
+        serial=ser,
+        motor="A",
+        verbose=False
+    )
+
+    with mock.patch("smc3_readback_diagnostic.time.sleep") as mock_sleep:
+        diag.run_active(
+            motor="A", targets=[512],
+            settling_delay=settling_delay,
+            sample_count=sample_count
+        )
+
+    # Filter sleep calls to only those matching the expected sampling interval
+    # (poll_motor also calls time.sleep internally, so filter by value)
+    sampling_sleeps = [
+        call[0][0] for call in mock_sleep.call_args_list
+        if call[0][0] == expected_interval
+    ]
+
+    assert len(sampling_sleeps) == sample_count, (
+        f"Expected {sample_count} sampling sleeps at {expected_interval}s, "
+        f"got {len(sampling_sleeps)}"
+    )
+
+    # Verify all sampling sleeps use the expected interval
+    for i, actual_duration in enumerate(sampling_sleeps):
+        assert actual_duration == expected_interval, (
+            f"Sampling sleep {i}: expected {expected_interval}s, got {actual_duration}s"
+        )
+
+    print(f"  ✓ {sample_count} sleeps at {expected_interval}s intervals = {settling_delay}s total")
+    print("TEST PASSED\n")
+
+
+def test_active_samples_cli_argument():
+    """Test that --active-samples CLI argument is parsed correctly."""
+    print("\n" + "=" * 60)
+    print("TEST: --active-samples CLI Argument")
+    print("=" * 60)
+
+    # Test with custom value
+    args = parse_args(["--simulate", "--active-target-test",
+                       "--active-samples", "8"])
+    assert args.active_samples == 8, (
+        f"Expected active_samples=8, got {args.active_samples}"
+    )
+
+    # Test default value (no --active-samples)
+    args = parse_args(["--simulate"])
+    assert args.active_samples == 5, (
+        f"Expected default active_samples=5, got {args.active_samples}"
+    )
+
+    # Verify type is int
+    assert isinstance(args.active_samples, int), (
+        f"Expected int, got {type(args.active_samples)}"
+    )
+
+    # Verify help contains the argument
+    import io
+    import contextlib
+    f = io.StringIO()
+    with contextlib.redirect_stdout(f):
+        try:
+            parse_args(["--help"])
+        except SystemExit:
+            pass
+    help_text = f.getvalue()
+    assert "--active-samples" in help_text, (
+        "Help output should mention --active-samples"
+    )
+
+    print("  ✓ --active-samples parses correctly with custom and default values")
     print("TEST PASSED\n")
 
 
@@ -2497,6 +3052,19 @@ def run_all_tests():
         test_active_test_transmits_position_commands_motor_a,
         test_active_test_transmits_position_commands_motors_b_c,
         test_active_test_position_clamping,
+        test_default_sample_count_is_5,
+        test_configurable_sample_count,
+        test_sample_index_values,
+        test_sample_timestamp_format,
+        test_readback_failure_produces_error_sample,
+        test_readback_failure_continues_sampling_loop,
+        test_multiple_steps_multi_sample,
+        test_readback_sample_field,
+        test_malformed_response_produces_error_sample,
+        test_single_sample_mode,
+        test_default_sample_count_omitted,
+        test_sampling_timing_evenly_spaced,
+        test_active_samples_cli_argument,
     ]
 
     passed = 0

@@ -99,15 +99,21 @@ class FakeSerial:
             raise IOError("Fake write error")
         self._write_count += 1
         self._write_history.append(data)
-        # Generate response if configured - append the next response
-        if self.responses:
-            # Use a counter to track which response to return
+        # Generate response only for SMC3 read commands ([rdA], [rdB], [rdC]).
+        # Position command writes ([A <high> <low>], etc.) do not generate responses.
+        is_read_command = (
+            len(data) == 5
+            and data[0] == 0x5B
+            and data[1] == 0x72  # 'r'
+            and data[2] == 0x64  # 'd'
+            and data[4] == 0x5D
+        )
+        if self.responses and is_read_command:
             if not hasattr(self, '_response_counter'):
                 self._response_counter = 0
             if self._response_counter < len(self.responses):
                 self._response_list.append(self.responses[self._response_counter])
                 self._response_counter += 1
-                # Reset _response_offset for the new response
                 self._response_offset = 0
         return len(data)
 
@@ -118,17 +124,23 @@ class FakeSerial:
         if self.raise_timeout:
             # Simulate timeout by always returning empty
             return b""
-        # Read from response list - return from the last response added
+        # FIFO: read from the first available response
         if not self._response_list:
             return b""
-        response = self._response_list[-1]  # Use the last response
-        # Return up to 'size' bytes from the current response
-        remaining = len(response) - self._response_offset
-        if remaining <= 0:
-            # No more data in current response
+        # Skip empty responses (represent timeouts/failures)
+        while self._response_list and self._response_list[0] == b"":
+            self._response_list.pop(0)
+        if not self._response_list:
             return b""
+        response = self._response_list[0]
         data = response[self._response_offset:self._response_offset + size]
-        self._response_offset += len(data)
+        # Consume the response fully
+        consumed = len(data)
+        if self._response_offset + consumed >= len(response):
+            self._response_list.pop(0)
+            self._response_offset = 0
+        else:
+            self._response_offset += consumed
         return data
 
     def reset_input_buffer(self):
@@ -206,7 +218,8 @@ class DiagnosticSession:
             writer = csv.writer(f)
             writer.writerow([
                 "step", "motor", "target", "transmitted_hex", "write_result",
-                "readback_sample", "feedback_raw", "target_raw",
+                "readback_sample", "sample_index", "sample_timestamp",
+                "feedback_raw", "target_raw",
                 "feedback_decoded", "target_decoded", "timestamp", "error",
                 "decode_status", "payload_byte_1_raw", "payload_byte_2_raw"
             ])
@@ -312,11 +325,13 @@ class DiagnosticSession:
         transmitted_hex: str,
         write_result: int,
         readback_sample: int,
-        feedback_raw: int,
-        target_raw: int,
-        feedback_decoded: Optional[float],
-        target_decoded: Optional[float],
-        timestamp: str,
+        sample_index: int = 0,
+        sample_timestamp: str = "",
+        feedback_raw: int = 0,
+        target_raw: int = 0,
+        feedback_decoded: Optional[float] = None,
+        target_decoded: Optional[float] = None,
+        timestamp: str = "",
         error: Optional[str] = None,
         decode_status: str = "",
         payload_byte_1_raw: int = 0,
@@ -327,7 +342,8 @@ class DiagnosticSession:
             writer = csv.writer(f)
             writer.writerow([
                 step, motor, target, transmitted_hex, str(write_result),
-                readback_sample, feedback_raw, target_raw,
+                readback_sample, sample_index, sample_timestamp,
+                feedback_raw, target_raw,
                 f"{feedback_decoded}" if feedback_decoded is not None else "",
                 f"{target_decoded}" if target_decoded is not None else "",
                 timestamp, error if error else "",
@@ -556,7 +572,40 @@ class ReadbackDiagnostic:
                 response_complete_ms, latency_ms, response_length, status, error
             )
 
-            self.last_response = bytes(response)
+            # Log decoded data to decoded CSV
+            response_bytes = bytes(response)
+            if (
+                len(response_bytes) == 5
+                and response_bytes[0] == 0x5B
+                and response_bytes[4] == 0x5D
+                and response_bytes[1] in (0x41, 0x42, 0x43)
+                and response_bytes[1] == ord(self.motor)
+            ):
+                framing_valid = True
+                payload_byte_1_raw = response_bytes[2]
+                payload_byte_2_raw = response_bytes[3]
+                feedback_raw = payload_byte_1_raw
+                target_raw = payload_byte_2_raw
+                feedback_decoded = feedback_raw * 4
+                target_decoded = target_raw * 4
+                decode_status = "OK"
+            else:
+                framing_valid = False
+                payload_byte_1_raw = 0
+                payload_byte_2_raw = 0
+                feedback_raw = 0
+                target_raw = 0
+                feedback_decoded = None
+                target_decoded = None
+                decode_status = "ERROR"
+
+            self.session.log_decoded(
+                request_id, self.motor, response_bytes, framing_valid,
+                feedback_raw, target_raw, feedback_decoded, target_decoded,
+                decode_status, payload_byte_1_raw, payload_byte_2_raw
+            )
+
+            self.last_response = response_bytes
             return status == "OK"
 
         except Exception as e:
@@ -682,18 +731,21 @@ class ReadbackDiagnostic:
         self,
         motor: str,
         targets: List[int],
-        settling_delay: float = 0.5
+        settling_delay: float = 0.5,
+        sample_count: int = 5
     ):
-        """Run active target-resolution test."""
+        """Run active target-resolution test with multi-sample readback."""
         self.running = True
         self.motor = motor
         self.stats["mode"] = "ACTIVE"
         self.stats["targets"] = targets
         self.stats["settling_delay"] = settling_delay
+        self.stats["sample_count"] = sample_count
 
         print(f"\nActive target-resolution test for motor {motor}")
         print(f"Targets: {targets}")
         print(f"Settling delay: {settling_delay}s")
+        print(f"Samples per step: {sample_count}")
         print(f"Press Ctrl+C to stop.\n")
 
         start = time.monotonic()
@@ -720,66 +772,88 @@ class ReadbackDiagnostic:
                 print(f"Failed to send: {e}")
                 break
 
-            # Wait for settling
-            print(f"Settling for {settling_delay}s...")
-            time.sleep(settling_delay)
+            # Collect multiple samples during settling period
+            sample_interval = settling_delay / sample_count
+            print(f"Settling for {settling_delay}s, collecting {sample_count} samples...")
 
-            # Query readback
-            print(f"Querying readback for {motor}...")
-            success = self.poll_motor(DEFAULT_TIMEOUT, 0.05)
+            for sample_idx in range(sample_count):
+                time.sleep(sample_interval)
+                sample_ts = dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
+                print(f"  Sample {sample_idx + 1}/{sample_count}...")
+                success = self.poll_motor(DEFAULT_TIMEOUT, 0.05)
 
-            if success:
-                response_hex = " ".join(f"{b:02X}" for b in self.last_response)
-                print(f"Response: {response_hex}")
+                if success:
+                    response_hex = " ".join(f"{b:02X}" for b in self.last_response)
+                    print(f"  Response: {response_hex}")
 
-                # Log active test
-                # Extract payload bytes from response using same logic as _analyze_response()
-                response = self.last_response
-                if (
-                    len(response) == 5
-                    and response[0] == 0x5B
-                    and response[4] == 0x5D
-                    and response[1] in (0x41, 0x42, 0x43)
-                    and response[1] == ord(self.motor)
-                ):
-                    payload_byte_1_raw = response[2]
-                    payload_byte_2_raw = response[3]
-                    feedback_raw = payload_byte_1_raw
-                    target_raw = payload_byte_2_raw
-                    feedback_decoded = feedback_raw * 4
-                    target_decoded = target_raw * 4
-                    decode_status = "OK"
+                    # Log active test
+                    # Extract payload bytes from response using same logic as _analyze_response()
+                    response = self.last_response
+                    if (
+                        len(response) == 5
+                        and response[0] == 0x5B
+                        and response[4] == 0x5D
+                        and response[1] in (0x41, 0x42, 0x43)
+                        and response[1] == ord(self.motor)
+                    ):
+                        payload_byte_1_raw = response[2]
+                        payload_byte_2_raw = response[3]
+                        feedback_raw = payload_byte_1_raw
+                        target_raw = payload_byte_2_raw
+                        feedback_decoded = feedback_raw * 4
+                        target_decoded = target_raw * 4
+                        decode_status = "OK"
+                    else:
+                        payload_byte_1_raw = 0
+                        payload_byte_2_raw = 0
+                        feedback_raw = 0
+                        target_raw = 0
+                        feedback_decoded = None
+                        target_decoded = None
+                        decode_status = "ERROR"
+
+                    self.session.log_active_test(
+                        step=step,
+                        motor=self.motor,
+                        target=target,
+                        transmitted_hex=transmitted_hex,
+                        write_result=written,
+                        readback_sample=sample_count,
+                        sample_index=sample_idx,
+                        sample_timestamp=sample_ts,
+                        feedback_raw=feedback_raw,
+                        target_raw=target_raw,
+                        feedback_decoded=feedback_decoded,
+                        target_decoded=target_decoded,
+                        timestamp=sample_ts,
+                        error=None,
+                        decode_status=decode_status,
+                        payload_byte_1_raw=payload_byte_1_raw,
+                        payload_byte_2_raw=payload_byte_2_raw
+                    )
                 else:
-                    payload_byte_1_raw = 0
-                    payload_byte_2_raw = 0
-                    feedback_raw = 0
-                    target_raw = 0
-                    feedback_decoded = None
-                    target_decoded = None
-                    decode_status = "ERROR"
-
-                self.session.log_active_test(
-                    step=step,
-                    motor=self.motor,
-                    target=target,
-                    transmitted_hex=transmitted_hex,
-                    write_result=written,
-                    readback_sample=1,
-                    feedback_raw=feedback_raw,
-                    target_raw=target_raw,
-                    feedback_decoded=feedback_decoded,
-                    target_decoded=target_decoded,
-                    timestamp=dt.datetime.now().astimezone().isoformat(timespec="milliseconds"),
-                    decode_status=decode_status,
-                    payload_byte_1_raw=payload_byte_1_raw,
-                    payload_byte_2_raw=payload_byte_2_raw
-                )
-            else:
-                print("No response received")
-
-            if self.running:
-                print("Waiting for next step...")
-                time.sleep(settling_delay)
+                    poll_error = "timeout"
+                    print(f"  No response received (sample {sample_idx + 1})")
+                    # Log ERROR sample with null decoded fields
+                    self.session.log_active_test(
+                        step=step,
+                        motor=self.motor,
+                        target=target,
+                        transmitted_hex=transmitted_hex,
+                        write_result=written,
+                        readback_sample=sample_count,
+                        sample_index=sample_idx,
+                        sample_timestamp=sample_ts,
+                        feedback_raw=0,
+                        target_raw=0,
+                        feedback_decoded=None,
+                        target_decoded=None,
+                        timestamp=sample_ts,
+                        error=poll_error,
+                        decode_status="ERROR",
+                        payload_byte_1_raw=0,
+                        payload_byte_2_raw=0
+                    )
 
         self.running = False
 
@@ -814,7 +888,8 @@ def parse_motor_arg(motors: str) -> List[str]:
     return result
 
 
-def main(argv=None, serial_factory=None):
+def parse_args(argv=None):
+    """Parse command-line arguments and return the parsed namespace."""
     parser = argparse.ArgumentParser(
         description="SMC3 Readback Diagnostic Utility for DOF Reality H3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -905,6 +980,12 @@ Examples:
         help="Settling delay for active test (default: 0.5)"
     )
     parser.add_argument(
+        "--active-samples",
+        type=int,
+        default=5,
+        help="Number of readback samples per active-test step (default: 5)"
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default=None,
@@ -940,9 +1021,13 @@ Examples:
     )
 
     if argv is None:
-        args = parser.parse_args()
+        return parser.parse_args()
     else:
-        args = parser.parse_args(argv)
+        return parser.parse_args(argv)
+
+
+def main(argv=None, serial_factory=None):
+    args = parse_args(argv)
 
     # ── Simulate mode branch (early exit, before hardware-dependent code) ─
     if args.simulate:
@@ -1039,7 +1124,7 @@ Examples:
                     targets = active_targets[:]
                     if simulate_count > 0:
                         targets = targets[:simulate_count]
-                    diagnostic.run_active(args.active_motor, targets, args.active_settle)
+                    diagnostic.run_active(args.active_motor, targets, args.active_settle, sample_count=args.active_samples)
                 else:
                     # Passive mode: round-robin motor distribution for ALL
                     if args.motor == "ALL":
@@ -1241,7 +1326,7 @@ Examples:
                 # Active test mode
                 print("\nStarting active target-resolution test...")
                 diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
-                diagnostic.run_active(args.active_motor, active_targets, args.active_settle)
+                diagnostic.run_active(args.active_motor, active_targets, args.active_settle, sample_count=args.active_samples)
             elif args.motor == "ALL":
                 # Passive test mode: round-robin motor polling (A, B, C)
                 motor_cycle = ["A", "B", "C"]
