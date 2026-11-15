@@ -50,6 +50,8 @@ Account for startup, shutdown, and scheduling overhead. A small difference is no
 
 Do not claim precise timing accuracy unless the output provides sufficient timing measurements.
 
+Do not attribute a polling shortfall to startup/shutdown overhead, sleep intervals, or scheduling behavior unless the implementation or timing measurements support that explanation. Otherwise, describe the cause as possible but unverified.
+
 ### 4. Interpret the diagnostic mode
 
 **PASSIVE mode:**
@@ -69,6 +71,8 @@ Clearly distinguish:
 - What the CLI output directly demonstrates.
 - What the results reasonably suggest.
 - What remains unverified.
+- Successful response counts alone do not establish consistent readback values across individual motors. That requires examining the decoded data.
+- Successful response validation establishes that the diagnostic accepted the response framing. It does not independently verify that the assumed protocol matches the installed firmware.
 
 In particular, successful communication does not independently establish:
 - Physical motor position accuracy.
