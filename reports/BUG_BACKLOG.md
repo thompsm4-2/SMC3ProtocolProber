@@ -15,9 +15,9 @@
 | Status | Count | Notes |
 |--------|-------|-------|
 | Open (confirmed bugs) | 2 | BUG-001 (P1), BUG-005 (P2) |
-| Rejected (false positives) | 6 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015 |
+| Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
 | Code quality / test maintenance | 7 | BUG-007, BUG-009, BUG-010, BUG-011, BUG-012, BUG-013, BUG-014 |
-| **Total retained** | **15** | All original IDs preserved |
+| **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
 |----------|-------|
@@ -127,6 +127,36 @@
 | **Confidence** | High |
 | **Notes** | Header duplication is only theoretically possible if two runs start within the same second. The `active_file` has explicit overwrite handling (line 196), while other files use append mode — this inconsistency is harmless in practice but could be cleaned up. |
 
+### BUG-016: FakeSerial TX/RX buffer separation concern (rejected)
+
+| Field        | Value |
+|--------------|-------|
+| **Status**   | Rejected |
+| **File(s)**  | `src/calibration/smc3_readback_diagnostic.py` lines 67–171 (FakeSerial class) |
+| **Impact**   | N/A — not a bug |
+| **Description** | The original concern questioned whether FakeSerial's serial read and write behavior could allow transmitted command bytes to be returned as simulated controller responses, due to a suspected shared buffer between TX and RX. Verification shows the TX and RX paths are properly separated:
+
+1. **TX path** (`write()`, lines 94–119): Written data is stored in `_write_history` (line 101) for test observation only. The transmitted command bytes are never placed into any read buffer.
+2. **RX path** (`read()`, lines 120–142): Reads exclusively from `_response_list` (lines 128–141). Empty responses (timeouts) are skipped (line 131–132). Returns `b""` if no responses available.
+3. **Response generation**: When a read command (`[rdA]`, `[rdB]`, `[rdC]`) is written, a canned response from `self.responses` is appended to `_response_list` (line 115). This is a **pre-configured separate byte sequence**, not the transmitted command bytes.
+4. **Dead buffers**: `_input_buffer` and `_output_buffer` (lines 85–86) are created in `__init__` but never used for data flow. `reset_input_buffer()` (line 148) and `close()` (lines 157–160) reference them, but they are dead code.
+
+The canned responses are distinct from the transmitted command. For example, `write(b'[rdA]')` appends `self.responses[n]` (e.g., `b'[rdA]OK5D'`) to `_response_list` — the transmitted bytes `0x5B 0x72 0x64 0x41 0x5D` never enter the read path.
+
+The concern likely arose from observing `_input_buffer` and `_output_buffer` created in `__init__` (lines 85–86), which are dead code, creating the impression of a naive shared-buffer design.
+
+**Existing test coverage** that validates this separation:
+- `test_fake_serial_responses` — verifies FIFO response delivery and correct response matching
+- `test_normal_passive_cli_execution` — full integration: confirms writes are read commands, reads contain valid response bytes, no position commands sent
+- `test_single_motor_cli_execution` — confirms only the correct motor command is sent
+- `test_response_request_association` — each request has associated response
+
+No test explicitly asserts "transmitted command bytes do not appear in reads," but the implementation design makes this impossible. |
+| **Evidence** | ```python # FakeSerial.__init__ (lines 85-86) - DEAD BUFFERS self._input_buffer = io.BytesIO()  # Never used for data flow self._output_buffer = io.BytesIO()  # Never used for data flow # FakeSerial.write() (lines 94-119) - TX path self._write_history.append(data)  # TX data tracked for observation only # Response generated from canned data, NOT from write argument if self.responses and is_read_command:     self._response_list.append(self.responses[self._response_counter])  # Separate canned data # FakeSerial.read() (lines 120-142) - RX path only if not self._response_list:     return b""  # Empty if no canned responses available response = self._response_list[0]  # Reads ONLY from _response_list ``` |
+| **Priority** | N/A |
+| **Confidence** | High |
+| **Notes** | The FakeSerial implementation in `smc3_readback_diagnostic.py` is correctly designed. A separate FakeSerial class exists in `test_fake_serial.py` (used by `h3_characterize.py`) with a different implementation using `_output_buffer` — that class also does not have a TX/RX separation issue (responses are written to `_output_buffer` only from canned data, not from write arguments). |
+
 ### BUG-015: `build_sweep()` can produce duplicate positions
 
 | Field        | Value |
@@ -228,6 +258,12 @@ These are retained for awareness but are not functional defects. They represent 
 
 ---
 
+### BUG-016: TX/RX buffer separation analysis
+1. **Buffer tracing**: Inspected all FakeSerial methods (`__init__`, `write`, `read`, `reset_input_buffer`, `flush`, `close`) confirming `_input_buffer` and `_output_buffer` are never read from in `write()` or `read()`. The actual data flow uses `_response_list` (RX) and `_write_history` (TX observation).
+2. **Response generation tracing**: Confirmed `write()` appends `self.responses[self._response_counter]` (canned response from constructor argument) to `_response_list`, not the write argument itself.
+3. **Read path isolation**: Confirmed `read()` only reads from `_response_list` and returns `b""` when empty. No code path allows write data to enter `_response_list`.
+4. **Test coverage review**: Verified existing tests (`test_fake_serial_responses`, `test_normal_passive_cli_execution`, `test_single_motor_cli_execution`, `test_response_request_association`) exercise the TX/RX flow and would detect any TX→RX data leakage.
+
 ## Appendix: Re-Verification Methodology
 
 1. **Protocol verification (BUG-001):** Compared READ_COMMANDS byte values between `h3_characterize.py` and `smc3_readback_diagnostic.py` against the ChatGPT-archive reference implementation (`smc3.py` line 48) and the November 14, 2026 H3 readback investigation (which confirmed uppercase `[rdA]`, `[rdB]`, `[rdC]` work).
@@ -250,7 +286,7 @@ These are retained for awareness but are not functional defects. They represent 
 |------|-------|-------|
 | `src/calibration/h3_characterize.py` | ~540 | Main characterization tool |
 | `src/calibration/smc3_readback_diagnostic.py` | ~1420 | Readback diagnostic utility |
-| `src/calibration/test_readback_diagnostic.py` | ~2700 | Diagnostic test suite |
+| `src/calibration/test_readback_diagnostic.py` | ~3177 | Diagnostic test suite (68 test functions) |
 | `src/calibration/test_fake_serial.py` | ~200 | Fake serial tests |
 | `src/calibration/test_v04.py` | ~320 | v0.4 legacy tests |
 | `analysis/analyze_h3_characterization.py` | ~145 | Analysis tool |
@@ -261,7 +297,7 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Change | Details |
 |--------|---------|
-| **Rejected** | BUG-002 (double write), BUG-003 (stats loss), BUG-004 (KeyError), BUG-006 (flush discards input), BUG-008 (CSV duplication), BUG-015 (sweep duplicates) |
+| **Rejected** | BUG-002 (double write), BUG-003 (stats loss), BUG-004 (KeyError), BUG-006 (flush discards input), BUG-008 (CSV duplication), BUG-015 (sweep duplicates), BUG-016 (FakeSerial TX/RX concern) |
 | **Downgraded** | BUG-007: P2 → P3 (dead code, not functional) |
 | **Reclassified** | BUG-009, BUG-010, BUG-011, BUG-014: confirmed as code-quality observations |
 | **Reclassified** | BUG-012, BUG-013: confirmed as test-maintenance issues |
