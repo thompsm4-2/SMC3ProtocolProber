@@ -42,9 +42,9 @@ FRAME_LEN = 11
 
 # SMC3 read command bytes
 READ_COMMANDS = {
-    "A": bytes([91, 114, 100, 97, 93]),  # [rda]
-    "B": bytes([91, 114, 100, 98, 93]),  # [rdb]
-    "C": bytes([91, 114, 100, 99, 93]),  # [rdc]
+    "A": bytes([91, 114, 100, 65, 93]),  # [rdA]
+    "B": bytes([91, 114, 100, 66, 93]),  # [rdB]
+    "C": bytes([91, 114, 100, 67, 93]),  # [rdC]
 }
 
 

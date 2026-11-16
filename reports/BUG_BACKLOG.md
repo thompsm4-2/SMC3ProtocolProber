@@ -14,17 +14,17 @@
 
 | Status | Count | Notes |
 |--------|-------|-------|
-| Open (confirmed bugs) | 2 | BUG-001 (P1), BUG-005 (P2) |
+| Open (confirmed bugs) | 1 | BUG-005 (P2) |
 | Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
 | Code quality / test maintenance | 7 | BUG-007, BUG-009, BUG-010, BUG-011, BUG-012, BUG-013, BUG-014 |
 | **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
 |----------|-------|
-| P1 – High | 1 |
+| P1 – High | 0 |
 | P2 | 1 |
 | P3 | 7 |
-| **Total** | **9** (functional + code quality) |
+| **Total** | **8** (functional + code quality) |
 
 ---
 
@@ -34,7 +34,7 @@
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open |
+| **Status**   | Resolved |
 | **File(s)**  | `src/calibration/h3_characterize.py` line 52; `src/calibration/smc3_readback_diagnostic.py` line 48 |
 | **Impact**   | `h3_characterize.py` sends SMC3 readback commands with lowercase motor bytes, whereas the November 14, 2026 H3 investigation confirmed the controller responds to uppercase `[rdA]`, `[rdB]`, `[rdC]`. The practical impact is unreliable or unavailable readback data in the `h3_characterize.py` characterization workflow. No hardware damage, safety risk, or data loss has been demonstrated. |
 | **Description** | `h3_characterize.py` encodes read requests with **lowercase** motor bytes: `bytes([91, 114, 100, 97, 93])` → `[rda]` (0x5B 0x72 0x64 0x61 0x5D). `smc3_readback_diagnostic.py` encodes with **uppercase** motor bytes: `bytes([91, 114, 100, 65, 93])` → `[rdA]` (0x5B 0x72 0x64 0x41 0x5D). The third motor byte differs by 32 (0x61 vs 0x41). |
@@ -43,6 +43,7 @@
 | **Priority** | P1 – High |
 | **Confidence** | High |
 | **Notes** | The ChatGPT-archive `smc3.py` (line 48) uses `encode_read_feedback` which produces `bytes((0x5B, ord("r"), ord("d"), ord(motor), 0x5D))` with motor uppercased — this is upstream reference implementation evidence. The November 14, 2026 H3 readback investigation demonstrated that the actual H3 controller responds to uppercase `[rdA]`, `[rdB]`, `[rdC]` commands. This measured evidence establishes that `smc3_readback_diagnostic.py` encodes correctly and `h3_characterize.py` encodes incorrectly. The lowercase `[rda]` implementation in `h3_characterize.py` is a legacy error — it may have worked with an older controller firmware version or was simply a typo that propagated. No hardware damage, safety risk, or data loss has been demonstrated; the practical impact is unreliable or unavailable readback data in the `h3_characterize.py` characterization workflow. |
+| **Resolution** | Fixed in `openspec/changes/fix-readback-encoding/`: byte literals corrected to uppercase (Motor A: 97→65, B: 98→66, C: 99→67). Regression test added in `src/calibration/test_h3_characterize.py`. All 73 existing tests in `test_readback_diagnostic.py` pass. |
 
 ---
 
