@@ -6,6 +6,7 @@ All tests use FakeSerial and do not require hardware.
 
 import csv
 import inspect
+import io
 import os
 import sys
 import tempfile
@@ -2963,6 +2964,7 @@ def test_active_samples_cli_argument():
 
     # Test with custom value
     args = parse_args(["--simulate", "--active-target-test",
+                       "--active-motor", "A",
                        "--active-samples", "8"])
     assert args.active_samples == 8, (
         f"Expected active_samples=8, got {args.active_samples}"
@@ -2994,6 +2996,84 @@ def test_active_samples_cli_argument():
     )
 
     print("  ✓ --active-samples parses correctly with custom and default values")
+    print("TEST PASSED\n")
+
+
+def test_active_target_test_requires_active_motor():
+    """Regression: --active-target-test without --active-motor raises SystemExit(2)."""
+    print("\n" + "=" * 60)
+    print("TEST: --active-target-test requires --active-motor")
+    print("=" * 60)
+
+    factory_called = [False]
+
+    def tracking_factory(**kwargs):
+        factory_called[0] = True
+        raise AssertionError("serial_factory should not be called for invalid args")
+
+    with mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+        try:
+            main(
+                argv=[
+                    "--simulate",
+                    "--active-target-test",
+                    "--motor", "A",
+                    "--simulate-count", "1",
+                ],
+                serial_factory=tracking_factory,
+            )
+            assert False, "Expected SystemExit(2)"
+        except SystemExit as e:
+            assert e.code == 2, f"Expected exit code 2, got {e.code}"
+
+    assert not factory_called[0], "serial_factory was called despite invalid arguments"
+    stderr_output = mock_stderr.getvalue()
+    assert "--active-target-test requires --active-motor" in stderr_output, (
+        f"Expected error message not found in stderr: {stderr_output!r}"
+    )
+
+    print("  ✓ SystemExit(2) raised for missing --active-motor")
+    print("  ✓ Error message appears on stderr")
+    print("  ✓ Serial factory was not called")
+    print("TEST PASSED\n")
+
+
+def test_polling_rate_must_be_positive():
+    """Regression: --polling-rate 0 raises SystemExit(2)."""
+    print("\n" + "=" * 60)
+    print("TEST: --polling-rate must be > 0")
+    print("=" * 60)
+
+    factory_called = [False]
+
+    def tracking_factory(**kwargs):
+        factory_called[0] = True
+        raise AssertionError("serial_factory should not be called for invalid args")
+
+    with mock.patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+        try:
+            main(
+                argv=[
+                    "--simulate",
+                    "--motor", "A",
+                    "--polling-rate", "0",
+                    "--simulate-count", "1",
+                ],
+                serial_factory=tracking_factory,
+            )
+            assert False, "Expected SystemExit(2)"
+        except SystemExit as e:
+            assert e.code == 2, f"Expected exit code 2, got {e.code}"
+
+    assert not factory_called[0], "serial_factory was called despite invalid arguments"
+    stderr_output = mock_stderr.getvalue()
+    assert "--polling-rate must be > 0" in stderr_output, (
+        f"Expected error message not found in stderr: {stderr_output!r}"
+    )
+
+    print("  ✓ SystemExit(2) raised for --polling-rate 0")
+    print("  ✓ Error message appears on stderr")
+    print("  ✓ Serial factory was not called")
     print("TEST PASSED\n")
 
 
@@ -3065,6 +3145,8 @@ def run_all_tests():
         test_default_sample_count_omitted,
         test_sampling_timing_evenly_spaced,
         test_active_samples_cli_argument,
+        test_active_target_test_requires_active_motor,
+        test_polling_rate_must_be_positive,
     ]
 
     passed = 0

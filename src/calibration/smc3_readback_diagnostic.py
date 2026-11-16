@@ -1020,10 +1020,15 @@ Examples:
         help="Number of requests to simulate before stopping (default: 10, 0=unlimited in passive mode)"
     )
 
-    if argv is None:
-        return parser.parse_args()
-    else:
-        return parser.parse_args(argv)
+    args = parser.parse_args() if argv is None else parser.parse_args(argv)
+
+    # Validate argument combinations
+    if args.active_target_test and not args.active_motor:
+        parser.error("--active-target-test requires --active-motor")
+    if args.polling_rate <= 0:
+        parser.error("--polling-rate must be > 0")
+
+    return args
 
 
 def main(argv=None, serial_factory=None):
@@ -1236,22 +1241,11 @@ def main(argv=None, serial_factory=None):
             print("No serial devices detected.")
         return 0
 
-    # Validate arguments
-    if args.active_target_test:
-        if not args.active_motor:
-            parser.error("--active-target-test requires --active-motor")
-        if args.motor != args.active_motor:
-            print("Warning: --motor and --active-motor differ. Using --active-motor for active test.")
-
     # Parse motors (only if not listing devices)
     if not args.list_devices:
         motors = parse_motor_arg(args.motor)
         if not motors:
             parser.error("--motor must contain A, B, C, or ALL")
-
-        # Validate polling rate
-        if args.polling_rate <= 0:
-            parser.error("--polling-rate must be > 0")
 
         # Validate active test targets
         active_targets = ACTIVE_TEST_SEQUENCE[:]
