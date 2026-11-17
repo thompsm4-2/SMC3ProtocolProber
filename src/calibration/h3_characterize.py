@@ -219,7 +219,6 @@ def send_command(ser, command, tx_logger=None):
         raise ValueError(f"invalid SMC3 command: {command!r}")
     command_type, motor, position = classify_command(command)
     written = None
-    written = None
     logged = False
     try:
         written = ser.write(command)
