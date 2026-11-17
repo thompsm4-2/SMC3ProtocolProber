@@ -35,6 +35,7 @@ architectural changes.
 - Do not introduce unnecessary dependencies.
 - Check Python syntax and imports before delivering
   modified code.
+- Never edit an existing test just to make it pass. Fix the code instead.
 
 ## Hardware Safety
 
