@@ -16,15 +16,15 @@
 |--------|-------|-------|
 | Open (confirmed bugs) | 1 | BUG-005 (P2) |
 | Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
-| Code quality / test maintenance | 7 | BUG-007, BUG-009, BUG-010, BUG-011, BUG-012, BUG-013, BUG-014 |
+| Code quality / test maintenance | 6 | BUG-009, BUG-010, BUG-011, BUG-012, BUG-013, BUG-014 |
 | **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
 |----------|-------|
 | P1 – High | 0 |
 | P2 | 1 |
-| P3 | 7 |
-| **Total** | **8** (functional + code quality) |
+| P3 | 6 |
+| **Total** | **7** (functional + code quality) |
 
 ---
 
@@ -181,13 +181,14 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open (code quality) |
-| **File(s)**  | `src/calibration/h3_characterize.py` lines 220–221 |
+| **Status**   | Resolved |
+| **File(s)**  | `src/calibration/h3_characterize.py` line 221 |
 | **Impact**   | None. Dead code. |
-| **Description** | The statement `written = None` appears twice on consecutive lines. |
-| **Evidence** | ```python # Lines 220-221 written = None written = None ``` |
+| **Description** | The statement `written = None` appeared twice on consecutive lines. |
+| **Evidence** | ```python # Lines 220-221 (before fix) written = None written = None ``` |
 | **Priority** | P3 |
 | **Confidence** | High |
+| **Resolution** | Fixed in `openspec/changes/fix-duplicate-written-assignment/`: duplicate line 221 removed. File passes `py_compile`. All 2 existing tests in `test_h3_characterize.py` pass. |
 
 ### BUG-009: `send_request()` is dead code with misleading return value
 
