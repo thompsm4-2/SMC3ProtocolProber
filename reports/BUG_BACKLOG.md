@@ -257,12 +257,13 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open (code quality) |
+| **Status**   | Won't Fix |
 | **File(s)**  | `analysis/analyze_h3_characterization.py` line 23 |
 | **Impact**   | None in practice. Input is validated. |
 | **Description** | Uses `encoding="utf-8-sig"` which silently strips BOM. The tool validates required columns (lines 224–229), which catches most encoding mismatches with a clear error. |
 | **Priority** | P3 |
 | **Confidence** | Low |
+| **Reason** | The tool is a one-off analysis script, not part of the production driver. `utf-8-sig` is arguably *better* than plain `utf-8` since it handles BOM gracefully. The change would provide zero practical benefit while adding unnecessary maintenance overhead. |
 
 ---
 
