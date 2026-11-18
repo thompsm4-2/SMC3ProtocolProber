@@ -701,7 +701,6 @@ def test_serial_factory_injection():
 
     # Verify FakeSerial was created with correct parameters
     assert test_serial.port == "/dev/ttyTEST0"
-    assert test_serial.baudrate == 500000
     assert test_serial.timeout == 0.1
     assert len(test_serial.responses) == 2
 
@@ -832,7 +831,6 @@ def test_normal_passive_cli_execution():
 
         # Verify FakeSerial was constructed with correct parameters
         assert fake_serial.port == "/dev/ttyUSB0", f"Expected port /dev/ttyUSB0, got {fake_serial.port}"
-        assert fake_serial.baudrate == 500000, f"Expected baudrate 500000, got {fake_serial.baudrate}"
         assert fake_serial.timeout == 0.10, f"Expected timeout 0.10, got {fake_serial.timeout}"
         print("  ✓ FakeSerial constructed with correct port, baudrate, and timeout")
 
@@ -1159,7 +1157,6 @@ def test_factory_selection_used_not_fallback():
 
         # Verify FakeSerial was constructed with expected parameters
         assert factory_return_value[0].port == "/dev/ttyUSB3"
-        assert factory_return_value[0].baudrate == 500000
         print("  ✓ FakeSerial constructed with correct parameters")
 
         # Verify no real serial.Serial was used

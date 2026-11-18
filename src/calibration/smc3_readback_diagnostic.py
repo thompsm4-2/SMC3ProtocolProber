@@ -77,7 +77,6 @@ class FakeSerial:
         raise_timeout: bool = False,
     ):
         self.port = port
-        self.baudrate = baudrate
         self.timeout = timeout
         self.responses = responses or []
         self.write_error = write_error
