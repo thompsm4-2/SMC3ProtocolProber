@@ -1173,7 +1173,7 @@ def main(argv=None, serial_factory=None):
                 stats["baud"] = args.baud
                 stats["read_timeout"] = args.read_timeout
                 stats["write_timeout"] = args.write_timeout
-                stats["mode"] = "SIMULATION_" + (args.active_target_test and "ACTIVE" or "PASSIVE")
+                stats["mode"] = "SIMULATION_" + ("ACTIVE" if args.active_target_test else "PASSIVE")
                 stats["motors"] = ",".join(motors)
                 stats["duration"] = args.duration
                 stats["polling_rate"] = args.polling_rate
@@ -1352,7 +1352,7 @@ def main(argv=None, serial_factory=None):
             stats["baud"] = args.baud
             stats["read_timeout"] = args.read_timeout
             stats["write_timeout"] = args.write_timeout
-            stats["mode"] = args.active_target_test and "ACTIVE" or "PASSIVE"
+            stats["mode"] = "ACTIVE" if args.active_target_test else "PASSIVE"
             stats["motors"] = ",".join(motors)
             stats["duration"] = args.duration
             stats["polling_rate"] = args.polling_rate
