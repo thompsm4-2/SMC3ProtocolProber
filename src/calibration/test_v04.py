@@ -6,7 +6,7 @@ import os
 import tempfile
 import time
 
-sys.path.insert(0, "/home/mathomp/Documents/Development/MotionSimProjects/h3_wt901c_characterization_v0.1")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
 from h3_characterize import (
     smc3_frame, 
@@ -61,9 +61,9 @@ def test_read_commands():
     """Test SMC3 read command bytes."""
     print("Testing READ_COMMANDS...")
     
-    assert READ_COMMANDS["A"] == bytes([91, 114, 100, 97, 93]), "Read A incorrect"
-    assert READ_COMMANDS["B"] == bytes([91, 114, 100, 98, 93]), "Read B incorrect"
-    assert READ_COMMANDS["C"] == bytes([91, 114, 100, 99, 93]), "Read C incorrect"
+    assert READ_COMMANDS["A"] == bytes([91, 114, 100, 65, 93]), "Read A incorrect"
+    assert READ_COMMANDS["B"] == bytes([91, 114, 100, 66, 93]), "Read B incorrect"
+    assert READ_COMMANDS["C"] == bytes([91, 114, 100, 67, 93]), "Read C incorrect"
     
     # Verify they're 5 bytes
     for motor, cmd in READ_COMMANDS.items():
@@ -155,8 +155,9 @@ def test_tx_logger():
     with open(existing_file, 'w') as f:
         f.write("existing")
     
+    run_start = time.monotonic()
     try:
-        logger = TXLogger(existing_file)
+        logger = TXLogger(existing_file, run_start)
         print("  Existing file check: FAILED (should have raised)")
     except FileExistsError as e:
         print("  Existing file check: OK")
@@ -166,7 +167,7 @@ def test_tx_logger():
     
     # Test successful logging
     new_file = "/tmp/test_tx_logger_new.csv"
-    with TXLogger(new_file) as logger:
+    with TXLogger(new_file, run_start) as logger:
         logger.log("POSITION", "C", 532, bytes([91, 67, 2, 20, 93]), 5, 5)
     
     with open(new_file, 'r') as f:

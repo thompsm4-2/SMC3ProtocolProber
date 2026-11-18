@@ -16,8 +16,8 @@
 |--------|-------|-------|
 | Open (confirmed bugs) | 1 | BUG-005 (P2) |
 | Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
-| Code quality / test maintenance | 2 | BUG-012, BUG-014 |
-| Resolved | 6 | BUG-001, BUG-007, BUG-009, BUG-010, BUG-011, BUG-013 |
+| Code quality / test maintenance | 1 | BUG-014 |
+| Resolved | 7 | BUG-001, BUG-007, BUG-009, BUG-010, BUG-011, BUG-012, BUG-013 |
 | **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
@@ -233,12 +233,13 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open (test maintenance) |
+| **Status**   | Resolved |
 | **File(s)**  | `src/calibration/test_v04.py` line 9 |
 | **Impact**   | Test is inapplicable to the current project. |
 | **Description** | `sys.path.insert(0, "/home/mathomp/Documents/Development/MotionSimProjects/h3_wt901c_characterization_v0.1")` imports from an external project. The test is a copy of v0.4 code from an earlier project iteration. |
 | **Priority** | P3 |
 | **Confidence** | High |
+| **Resolution** | Fixed in `openspec/changes/fix-test-v04-external-import/`: import path changed to `os.path.join(os.path.dirname(__file__))` so the test imports from the local `src/calibration/` directory. `test_tx_logger()` updated to pass the required `run_start` argument to `TXLogger()`. `test_read_commands()` assertions updated from lowercase to uppercase read command bytes to match the current module. All 8 tests pass with exit code 0. |
 
 ### BUG-013: `test_v04.py` calls undefined `test_readback_poller()`
 
@@ -307,7 +308,7 @@ These are retained for awareness but are not functional defects. They represent 
 | **Rejected** | BUG-002 (double write), BUG-003 (stats loss), BUG-004 (KeyError), BUG-006 (flush discards input), BUG-008 (CSV duplication), BUG-015 (sweep duplicates), BUG-016 (FakeSerial TX/RX concern) |
 | **Downgraded** | BUG-007: P2 → P3 (dead code, not functional) |
 | **Reclassified** | BUG-009, BUG-010, BUG-011, BUG-014: confirmed as code-quality observations |
-| **Reclassified** | BUG-012, BUG-013: confirmed as test-maintenance issues |
+| **Resolved** | BUG-012: P3 resolved — test import path fixed to local module, `TXLogger` API updated, all tests pass |
 | **Retained** | BUG-001: P0 confirmed (protocol mismatch) |
 | **Retained** | BUG-005: P2 confirmed (timeout ignored) |
 | **Resolved** | BUG-011: P3 resolved — removed dead `FakeSerial.baudrate` attribute and test assertions |
