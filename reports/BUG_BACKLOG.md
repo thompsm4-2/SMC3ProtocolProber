@@ -16,14 +16,15 @@
 |--------|-------|-------|
 | Open (confirmed bugs) | 1 | BUG-005 (P2) |
 | Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
-| Code quality / test maintenance | 3 | BUG-012, BUG-013, BUG-014 |
+| Code quality / test maintenance | 2 | BUG-012, BUG-014 |
+| Resolved | 6 | BUG-001, BUG-007, BUG-009, BUG-010, BUG-011, BUG-013 |
 | **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
 |----------|-------|
 | P1 – High | 0 |
 | P2 | 1 |
-| P3 | 5 |
+| P3 | 4 |
 | **Total** | **7** (functional + code quality) |
 
 ---
@@ -243,12 +244,13 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open (test maintenance) |
+| **Status**   | Resolved |
 | **File(s)**  | `src/calibration/test_v04.py` line 522 |
 | **Impact**   | Running `python test_v04.py` raises `NameError: name 'test_readback_poller' is not defined`. |
 | **Description** | The `main()` function calls `test_readback_poller()` at line 522, but this function is never defined in the file. This is a standalone test entry point, not part of any CI/CD pipeline. |
 | **Priority** | P3 |
 | **Confidence** | High |
+| **Resolution** | Fixed in `openspec/changes/fix-test-v04-undefined-test-readback-poller/`: call to `test_readback_poller()` removed from `main()` (line 522). File compiles cleanly with `py_compile`. Runtime `NameError` eliminated. |
 
 ### BUG-014: `analyze_h3_characterization.py` assumes UTF-8 with optional BOM
 
