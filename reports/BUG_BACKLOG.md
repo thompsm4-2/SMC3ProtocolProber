@@ -16,7 +16,7 @@
 |--------|-------|-------|
 | Open (confirmed bugs) | 1 | BUG-005 (P2) |
 | Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
-| Code quality / test maintenance | 5 | BUG-009, BUG-010, BUG-012, BUG-013, BUG-014 |
+| Code quality / test maintenance | 4 | BUG-010, BUG-012, BUG-013, BUG-014 |
 | **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
@@ -194,13 +194,14 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open (code quality) |
+| **Status**   | Resolved |
 | **File(s)**  | `src/calibration/smc3_readback_diagnostic.py` lines 448–457 |
 | **Impact**   | None. Dead code. |
 | **Description** | `send_request()` is defined but never called. Its return value `(b"", written)` returns empty bytes as a placeholder "response," which would be misleading if the method were ever used. |
 | **Evidence** | `grep -n "send_request" smc3_readback_diagnostic.py` returns only the definition at line 448. |
 | **Priority** | P3 |
 | **Confidence** | High |
+| **Resolution** | Fixed in `openspec/changes/remove-dead-send-request-method/`: `send_request()` method definition removed (lines 448–457). File passes `py_compile`. All 73 existing tests in `test_readback_diagnostic.py` pass.
 
 ### BUG-010: Fragile `and`/`or` idiom for mode string
 
@@ -307,4 +308,4 @@ These are retained for awareness but are not functional defects. They represent 
 | **Retained** | BUG-001: P0 confirmed (protocol mismatch) |
 | **Retained** | BUG-005: P2 confirmed (timeout ignored) |
 | **Resolved** | BUG-011: P3 resolved — removed dead `FakeSerial.baudrate` attribute and test assertions |
-| **Totals updated** | Confirmed: 2, Rejected: 6, Code quality/test maintenance: 5, Resolved: 1 |
+| **Totals updated** | Confirmed: 2, Rejected: 6, Code quality/test maintenance: 4, Resolved: 2 |
