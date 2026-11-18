@@ -38,7 +38,7 @@ import tempfile
 import time
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 
 # Import smc3_frame for position command encoding in active test
 from h3_characterize import smc3_frame
@@ -443,18 +443,6 @@ class ReadbackDiagnostic:
             "unresolved": []
         }
         self.last_response = b""  # Most recent response bytes from poll_motor()
-
-    def send_request(self) -> Tuple[bytes, int]:
-        """Send a readback request and return (response_bytes, bytes_written)."""
-        request = READ_COMMANDS[self.motor]
-        try:
-            written = self.serial.write(request)
-            if written != len(request):
-                raise IOError(f"Short write: {written}/{len(request)}")
-            self.serial.flush()
-            return b"", written
-        except Exception as e:
-            raise e
 
     def read_response(self, timeout: float) -> bytes:
         """Read response with timeout."""
