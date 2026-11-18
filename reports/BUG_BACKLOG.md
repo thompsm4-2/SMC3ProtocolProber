@@ -16,14 +16,14 @@
 |--------|-------|-------|
 | Open (confirmed bugs) | 1 | BUG-005 (P2) |
 | Rejected (false positives) | 7 | BUG-002, BUG-003, BUG-004, BUG-006, BUG-008, BUG-015, BUG-016 |
-| Code quality / test maintenance | 4 | BUG-010, BUG-012, BUG-013, BUG-014 |
+| Code quality / test maintenance | 3 | BUG-012, BUG-013, BUG-014 |
 | **Total retained** | **16** | All original IDs preserved |
 
 | Priority | Count |
 |----------|-------|
 | P1 – High | 0 |
 | P2 | 1 |
-| P3 | 6 |
+| P3 | 5 |
 | **Total** | **7** (functional + code quality) |
 
 ---
@@ -207,13 +207,14 @@ These are retained for awareness but are not functional defects. They represent 
 
 | Field        | Value |
 |--------------|-------|
-| **Status**   | Open (code quality) |
-| **File(s)**  | `src/calibration/smc3_readback_diagnostic.py` lines 1189, 1368 |
+| **Status**   | Resolved |
+| **File(s)**  | `src/calibration/smc3_readback_diagnostic.py` lines 1176, 1355 |
 | **Impact**   | None currently. Fragile pattern. |
 | **Description** | ```python stats["mode"] = args.active_target_test and "ACTIVE" or "PASSIVE" ``` This idiom works because `"ACTIVE"` is truthy, but would fail if a future mode name were falsy (e.g., empty string). Use a proper ternary: `"ACTIVE" if args.active_target_test else "PASSIVE"`. |
-| **Evidence** | ```python # Line 1189: stats["mode"] = "SIMULATION_" + (args.active_target_test and "ACTIVE" or "PASSIVE") # Line 1368: stats["mode"] = args.active_target_test and "ACTIVE" or "PASSIVE" ``` |
+| **Evidence** | ```python # Line 1176 (simulation): stats["mode"] = "SIMULATION_" + (args.active_target_test and "ACTIVE" or "PASSIVE") # Line 1355 (real hardware): stats["mode"] = args.active_target_test and "ACTIVE" or "PASSIVE" # Lines 1050, 1257 already use correct ternary: "ACTIVE" if args.active_target_test else "PASSIVE" ``` |
 | **Priority** | P3 |
 | **Confidence** | High |
+| **Resolution** | Fixed in `openspec/changes/fix-fragile-and-or-mode-idiom/`: both fragile `and`/`or` expressions replaced with proper ternary conditionals. `py_compile` passes. All 73 tests in `test_readback_diagnostic.py` pass. No behavioral change.
 
 ### BUG-011: `FakeSerial.baudrate` attribute is stored but never read
 
@@ -308,4 +309,4 @@ These are retained for awareness but are not functional defects. They represent 
 | **Retained** | BUG-001: P0 confirmed (protocol mismatch) |
 | **Retained** | BUG-005: P2 confirmed (timeout ignored) |
 | **Resolved** | BUG-011: P3 resolved — removed dead `FakeSerial.baudrate` attribute and test assertions |
-| **Totals updated** | Confirmed: 2, Rejected: 6, Code quality/test maintenance: 4, Resolved: 2 |
+| **Totals updated** | Confirmed: 2, Rejected: 6, Code quality/test maintenance: 3, Resolved: 3 |
