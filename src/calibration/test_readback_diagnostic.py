@@ -832,7 +832,7 @@ def test_normal_passive_cli_execution():
         # Verify FakeSerial was constructed with correct parameters
         assert fake_serial.port == "/dev/ttyUSB0", f"Expected port /dev/ttyUSB0, got {fake_serial.port}"
         assert fake_serial.timeout == 0.10, f"Expected timeout 0.10, got {fake_serial.timeout}"
-        print("  ✓ FakeSerial constructed with correct port, baudrate, and timeout")
+        print("  ✓ FakeSerial constructed with correct port and timeout")
 
         # Verify writes were uppercase read commands for motor A
         assert len(fake_serial.writes) > 0, "No writes were made"
