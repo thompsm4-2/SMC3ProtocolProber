@@ -684,7 +684,8 @@ class ReadbackDiagnostic:
         self,
         duration: float,
         polling_rate: float,
-        delay: float = 0.0
+        delay: float = 0.0,
+        timeout: float = DEFAULT_TIMEOUT
     ):
         """Run passive readback polling."""
         self.running = True
@@ -695,7 +696,7 @@ class ReadbackDiagnostic:
         self.stats["delay"] = delay
 
         print(f"\nStarting passive polling for {self.motor}...")
-        print(f"Interval: {interval:.3f}s, Timeout: {DEFAULT_TIMEOUT}s")
+        print(f"Interval: {interval:.3f}s, Timeout: {timeout}s")
         print(f"Press Ctrl+C to stop.\n")
 
         start = time.monotonic()
@@ -704,7 +705,7 @@ class ReadbackDiagnostic:
         while self.running:
             now = time.monotonic()
             if now - last_poll >= interval:
-                self.poll_motor(DEFAULT_TIMEOUT, interval, delay)
+                self.poll_motor(timeout, interval, delay)
                 last_poll = now
             time.sleep(0.01)
 
@@ -719,7 +720,8 @@ class ReadbackDiagnostic:
         motor: str,
         targets: List[int],
         settling_delay: float = 0.5,
-        sample_count: int = 5
+        sample_count: int = 5,
+        timeout: float = DEFAULT_TIMEOUT
     ):
         """Run active target-resolution test with multi-sample readback."""
         self.running = True
@@ -767,7 +769,7 @@ class ReadbackDiagnostic:
                 time.sleep(sample_interval)
                 sample_ts = dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
                 print(f"  Sample {sample_idx + 1}/{sample_count}...")
-                success = self.poll_motor(DEFAULT_TIMEOUT, 0.05)
+                success = self.poll_motor(timeout, 0.05)
 
                 if success:
                     response_hex = " ".join(f"{b:02X}" for b in self.last_response)
@@ -1116,7 +1118,7 @@ def main(argv=None, serial_factory=None):
                     targets = active_targets[:]
                     if simulate_count > 0:
                         targets = targets[:simulate_count]
-                    diagnostic.run_active(args.active_motor, targets, args.active_settle, sample_count=args.active_samples)
+                    diagnostic.run_active(args.active_motor, targets, args.active_settle, sample_count=args.active_samples, timeout=args.read_timeout)
                 else:
                     # Passive mode: round-robin motor distribution for ALL
                     if args.motor == "ALL":
@@ -1144,7 +1146,7 @@ def main(argv=None, serial_factory=None):
                                 diag_motor.request_counter = diagnostic.request_counter
                                 request_counter[0] += 1
                                 diag_motor.running = True
-                                diag_motor.poll_motor(DEFAULT_TIMEOUT, interval, args.delay)
+                                diag_motor.poll_motor(args.read_timeout, interval, args.delay)
                                 diagnostic = diag_motor
                                 motor_index += 1
                                 last_poll = now
@@ -1162,7 +1164,7 @@ def main(argv=None, serial_factory=None):
                             if now - last_poll >= interval:
                                 diagnostic.request_counter += 1
                                 request_counter[0] += 1
-                                diagnostic.poll_motor(DEFAULT_TIMEOUT, interval, args.delay)
+                                diagnostic.poll_motor(args.read_timeout, interval, args.delay)
                                 last_poll = now
                             time.sleep(0.01)
                         diagnostic.running = False
@@ -1307,7 +1309,7 @@ def main(argv=None, serial_factory=None):
                 # Active test mode
                 print("\nStarting active target-resolution test...")
                 diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
-                diagnostic.run_active(args.active_motor, active_targets, args.active_settle, sample_count=args.active_samples)
+                diagnostic.run_active(args.active_motor, active_targets, args.active_settle, sample_count=args.active_samples, timeout=args.read_timeout)
             elif args.motor == "ALL":
                 # Passive test mode: round-robin motor polling (A, B, C)
                 motor_cycle = ["A", "B", "C"]
@@ -1331,7 +1333,7 @@ def main(argv=None, serial_factory=None):
                         diag_motor.stats.update(diagnostic.stats)
                         diag_motor.request_counter = diagnostic.request_counter
                         diag_motor.running = True
-                        diag_motor.poll_motor(DEFAULT_TIMEOUT, interval, args.delay)
+                        diag_motor.poll_motor(args.read_timeout, interval, args.delay)
                         diagnostic = diag_motor
                         motor_index += 1
                         last_poll = now
@@ -1344,7 +1346,7 @@ def main(argv=None, serial_factory=None):
                 # Passive test mode (single motor)
                 print("\nStarting passive readback polling...")
                 diagnostic = ReadbackDiagnostic(session, ser, args.motor, verbose=args.verbose)
-                diagnostic.run_passive(args.duration, args.polling_rate, args.delay)
+                diagnostic.run_passive(args.duration, args.polling_rate, args.delay, timeout=args.read_timeout)
 
             # Write summary
             stats = diagnostic.stats
