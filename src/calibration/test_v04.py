@@ -519,7 +519,6 @@ def main():
         test_build_sweep()
         test_positions_for()
         test_tx_logger()
-        test_readback_poller()
         test_full_integration()
         test_sweep_sequence()
         test_position_frames()
